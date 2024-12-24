@@ -37,6 +37,8 @@ type Client struct {
 	requestToken RequestToken
 	// vault namespace
 	rootVaultNamespace string
+	// restrict the operator to the Vault namespace set in the rootVaultNamespace field
+	restrictNamespace bool
 	// failedRenewTokenAttempts is the number of failed renew token attempts, if the renew token function fails 5 times
 	// the liveness probe will fail, to force a restart of the operator.
 	failedRenewTokenAttempts int
@@ -101,6 +103,10 @@ func (c *Client) GetHealth(threshold int) error {
 	return nil
 }
 
+func (c *Client) IsNamespaceRestricted() (bool, string) {
+	return c.restrictNamespace, c.rootVaultNamespace
+}
+
 // GetSecret returns the value for a given secret.
 func (c *Client) GetSecret(secretEngine string, path string, keys []string, version int, isBinary bool, vaultNamespace string) (map[string][]byte, error) {
 	// Get the secret for the given path and return the secret data.
@@ -116,7 +122,7 @@ func (c *Client) GetSecret(secretEngine string, path string, keys []string, vers
 	// already failed.
 	if c.rootVaultNamespace != "" {
 		log.WithValues("rootVaultNamespace", c.rootVaultNamespace, "vaultNamespace", vaultNamespace).Info(fmt.Sprintf("Use Vault Namespace to read secret %s", path))
-		if vaultNamespace != "" {
+		if vaultNamespace != "" && !c.restrictNamespace {
 			c.client.SetNamespace(c.rootVaultNamespace + "/" + vaultNamespace)
 		} else {
 			c.client.SetNamespace(c.rootVaultNamespace)
