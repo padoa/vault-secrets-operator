@@ -98,6 +98,7 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 	vaultTokenMaxTTL := os.Getenv("VAULT_TOKEN_MAX_TTL")
 	vaultNamespace := os.Getenv("VAULT_NAMESPACE")
 	vaultPKIRenew := os.Getenv("VAULT_PKI_RENEW")
+	vaultDatabaseRenew := os.Getenv("VAULT_DATABASE_RENEW")
 	vaultAzureMsiObjectID := os.Getenv("AZURE_MSI_OBJECT_ID")
 
 	// Create new Vault configuration. This configuration is used to create the
@@ -117,10 +118,14 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 	}
 
 	if len(vaultPKIRenew) == 0 {
-		vaultPKIRenew = "1h"
+		vaultPKIRenew = "72h"
 	}
 
-	pkiRenew, err := time.ParseDuration(vaultPKIRenew)
+	if len(vaultDatabaseRenew) == 0 {
+		vaultDatabaseRenew = "168h"
+	}
+
+	PKIRenew, err := time.ParseDuration(vaultPKIRenew)
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +133,11 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 	vaultRestrictNamespace, err := strconv.ParseBool(os.Getenv("VAULT_RESTRICT_NAMESPACE"))
 	if err != nil {
 		vaultRestrictNamespace = false
+	}
+
+	databaseRenew, err := time.ParseDuration(vaultDatabaseRenew)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check which authentication method should be used.
@@ -182,7 +192,8 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 			tokenRenewalRetryInterval: tokenRenewalRetryInterval,
 			rootVaultNamespace:        vaultNamespace,
 			restrictNamespace:         vaultRestrictNamespace,
-			pkiRenew:                  pkiRenew,
+			PKIRenew:                  PKIRenew,
+			DatabaseRenew:             databaseRenew,
 		}, nil
 	}
 
@@ -250,7 +261,8 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 			tokenRenewalRetryInterval: tokenRenewalRetryInterval,
 			rootVaultNamespace:        vaultNamespace,
 			restrictNamespace:         vaultRestrictNamespace,
-			pkiRenew:                  pkiRenew,
+			PKIRenew:                  PKIRenew,
+			DatabaseRenew:             databaseRenew,
 		}, nil
 	}
 
@@ -330,7 +342,7 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 				}
 				return nil
 			},
-			pkiRenew: pkiRenew,
+			DatabaseRenew: databaseRenew,
 		}, nil
 	}
 
@@ -404,7 +416,7 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 
 				return nil
 			},
-			pkiRenew: pkiRenew,
+			PKIRenew: PKIRenew,
 		}, nil
 	}
 
@@ -477,7 +489,8 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 			tokenRenewalRetryInterval: tokenRenewalRetryInterval,
 			rootVaultNamespace:        vaultNamespace,
 			restrictNamespace:         vaultRestrictNamespace,
-			pkiRenew:                  pkiRenew,
+			PKIRenew:                  PKIRenew,
+			DatabaseRenew:             databaseRenew,
 		}, nil
 
 	}
@@ -668,7 +681,7 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 				}
 				return nil
 			},
-			pkiRenew: pkiRenew,
+			DatabaseRenew: databaseRenew,
 		}, nil
 	}
 
@@ -808,7 +821,7 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 				}
 				return nil
 			},
-			pkiRenew: pkiRenew,
+			DatabaseRenew: databaseRenew,
 		}, nil
 	}
 
