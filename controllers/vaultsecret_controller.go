@@ -261,8 +261,7 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if instance.Spec.ReconcileStrategy == "Merge" {
 		secret = mergeSecretData(secret, found)
 
-		if secret.Type == found.Type && reflect.DeepEqual(secret.Data, found.Data) &&
-			reflect.DeepEqual(secret.Labels, found.Labels) && reflect.DeepEqual(secret.Annotations, found.Annotations) {
+		if secret.Type == found.Type && reflect.DeepEqual(secret.Data, found.Data) && reflect.DeepEqual(secret.Labels, found.Labels) && reflect.DeepEqual(secret.Annotations, found.Annotations) && len(instance.Status.Conditions) == 1 && instance.Status.Conditions[0].Status == metav1.ConditionTrue {
 			log.Info("Skip updating a Secret cause data no change", "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
 		} else {
 			log.Info("Updating a Secret", "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
@@ -275,8 +274,7 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			r.updateConditions(ctx, instance, conditionReasonUpdated, "Secret was updated", metav1.ConditionTrue)
 		}
 	} else {
-		if secret.Type == found.Type && reflect.DeepEqual(secret.Data, found.Data) &&
-			reflect.DeepEqual(secret.Labels, found.Labels) && reflect.DeepEqual(secret.Annotations, found.Annotations) {
+		if secret.Type == found.Type && reflect.DeepEqual(secret.Data, found.Data) && reflect.DeepEqual(secret.Labels, found.Labels) && reflect.DeepEqual(secret.Annotations, found.Annotations) && len(instance.Status.Conditions) == 1 && instance.Status.Conditions[0].Status == metav1.ConditionTrue {
 			log.Info("Skip updating a Secret cause no change", "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
 		} else {
 			log.Info("Updating a Secret", "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
@@ -438,22 +436,12 @@ func templatingFunctions() template.FuncMap {
 // newSecretForCR returns a secret with the same name/namespace as the CR. The secret will include all labels and
 // annotations from the CR.
 func newSecretForCR(cr *ricobergerdev1alpha1.VaultSecret, data map[string][]byte) (*corev1.Secret, error) {
-	labels := map[string]string{}
-	for k, v := range cr.ObjectMeta.Labels {
-		labels[k] = v
-	}
-
-	annotations := map[string]string{}
-	for k, v := range cr.ObjectMeta.Annotations {
-		annotations[k] = v
-	}
-
 	if cr.Spec.Templates != nil {
 		newdata := make(map[string][]byte)
 		for k, v := range cr.Spec.Templates {
 			templated, err := runTemplate(cr, v, data)
 			if err != nil {
-				return nil, fmt.Errorf("Template ERROR: %w", err)
+				return nil, fmt.Errorf("template ERROR: %w", err)
 			}
 			newdata[k] = templated
 		}
@@ -464,8 +452,8 @@ func newSecretForCR(cr *ricobergerdev1alpha1.VaultSecret, data map[string][]byte
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        cr.Name,
 			Namespace:   cr.Namespace,
-			Labels:      labels,
-			Annotations: annotations,
+			Labels:      cr.ObjectMeta.Labels,
+			Annotations: cr.ObjectMeta.Annotations,
 		},
 		Data: data,
 		Type: cr.Spec.Type,
