@@ -33,6 +33,8 @@ type Client struct {
 	requestToken RequestToken
 	// vault namespace
 	rootVaultNamespace string
+	// restrict the operator to the Vault namespace set in the rootVaultNamespace field
+	restrictNamespace bool
 	// failedRenewTokenAttempts is the number of failed renew token attempts, if the renew token function fails 5 times
 	// the liveness probe will fail, to force a restart of the operator.
 	failedRenewTokenAttempts int
@@ -97,6 +99,10 @@ func (c *Client) GetHealth(threshold int) error {
 	}
 
 	return nil
+}
+
+func (c *Client) IsNamespaceRestricted() (bool, string) {
+	return c.restrictNamespace, c.rootVaultNamespace
 }
 
 // RenewLease renews a secret lease and returns the time at which it will expire.
