@@ -1,6 +1,7 @@
 name: Build & Push to Padoa ACR
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - master
@@ -8,8 +9,7 @@ on:
       - '*'
 
 jobs:
-  docker:
-    name: Docker
+  build-push:
     runs-on: ubuntu-22.04
     defaults:
       run:
@@ -21,9 +21,9 @@ jobs:
           fetch-depth: 0
 
       - name: Login to ACR
-        uses: azure/docker-login@v1
+        uses: azure/docker-login@v2
         with:
-          login-server: ${{ secrets.ACR_HOST  }}
+          login-server: ${{ secrets.ACR_HOST }}
           username: ${{ secrets.ACR_PUSH_USER }}
           password: ${{ secrets.ACR_PUSH_PASSWORD }}
 
