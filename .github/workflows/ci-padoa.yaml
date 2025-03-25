@@ -50,4 +50,4 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          tags: ${{ secrets.ACR_HOST }}/padoa-tools/vault-secrets-operator:${{ steps.tag.outputs.tag }}
+          tags: ${{ env.TAGS }}
