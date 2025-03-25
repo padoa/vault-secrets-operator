@@ -1,0 +1,53 @@
+name: Build & Push to Padoa ACR
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'
+
+jobs:
+  docker:
+    name: Docker
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Login to ACR
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.ACR_HOST  }}
+          username: ${{ secrets.ACR_PUSH_USER }}
+          password: ${{ secrets.ACR_PUSH_PASSWORD }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        with:
+          platforms: linux/amd64
+
+      - name: Compute Tags
+        run: |
+          TAGS="${{ secrets.ACR_HOST }}/padoa-tools/vault-secrets-operator:${{ github.sha }}"
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            TAGS="$TAGS,${{ secrets.ACR_HOST }}/padoa-tools/vault-secrets-operator:${GITHUB_REF:10}"
+          fi
+          echo TAGS="$TAGS" >> $GITHUB_ENV
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v3
+        with:
+          push: true
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          tags: ${{ secrets.ACR_HOST }}/padoa-tools/vault-secrets-operator:${{ steps.tag.outputs.tag }}
