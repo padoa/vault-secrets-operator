@@ -14,7 +14,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	ricobergerdev1alpha1 "github.com/ricoberger/vault-secrets-operator/api/v1alpha1"
+	ricobergerdev1alpha1 "github.com/padoa/vault-secrets-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 

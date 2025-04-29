@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	ricobergerdev1alpha1 "github.com/ricoberger/vault-secrets-operator/api/v1alpha1"
-	"github.com/ricoberger/vault-secrets-operator/controllers"
-	"github.com/ricoberger/vault-secrets-operator/vault"
+	ricobergerdev1alpha1 "github.com/padoa/vault-secrets-operator/api/v1alpha1"
+	"github.com/padoa/vault-secrets-operator/controllers"
+	"github.com/padoa/vault-secrets-operator/vault"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"

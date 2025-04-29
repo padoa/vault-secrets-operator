@@ -3,7 +3,7 @@ package controllers
 import (
 	"fmt"
 
-	ricobergerdev1alpha1 "github.com/ricoberger/vault-secrets-operator/api/v1alpha1"
+	ricobergerdev1alpha1 "github.com/padoa/vault-secrets-operator/api/v1alpha1"
 )
 
 func ValidatePKI(instance *ricobergerdev1alpha1.VaultSecret) error {

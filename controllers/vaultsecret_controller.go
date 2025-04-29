@@ -10,8 +10,8 @@ import (
 
 	"github.com/hashicorp/vault/api"
 
-	ricobergerdev1alpha1 "github.com/ricoberger/vault-secrets-operator/api/v1alpha1"
-	"github.com/ricoberger/vault-secrets-operator/vault"
+	ricobergerdev1alpha1 "github.com/padoa/vault-secrets-operator/api/v1alpha1"
+	"github.com/padoa/vault-secrets-operator/vault"
 
 	"github.com/Masterminds/sprig"
 	corev1 "k8s.io/api/core/v1"
