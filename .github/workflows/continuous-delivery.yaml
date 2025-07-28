@@ -7,7 +7,7 @@ on:
     branches:
       - master
       # TODO: remove this once merged
-      - fix/database-engine-msi-perf
+      - fix/vault-with-no-concurrence
     tags:
       - "*"
 
