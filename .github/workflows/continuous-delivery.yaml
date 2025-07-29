@@ -6,8 +6,6 @@ on:
   push:
     branches:
       - master
-      # TODO: remove this once merged
-      - fix/vault-with-no-concurrence
     tags:
       - "*"
 
