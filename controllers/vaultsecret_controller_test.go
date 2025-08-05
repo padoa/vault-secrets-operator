@@ -220,7 +220,7 @@ func TestNeedsCertificateRenewal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			needsRenewal, renewalDate := needsCertificateRenewal(
+			needsRenewal, renewalDate, _ := needsCertificateRenewal(
 				ctx,
 				tt.existingSecret,
 				tt.certificateDuration,

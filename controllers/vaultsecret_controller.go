@@ -117,9 +117,6 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	var expiresAt *time.Time
-	var requeueAfter time.Duration
-
 	// KV secret
 	if instance.Spec.SecretEngine == "" || instance.Spec.SecretEngine == ricobergerdev1alpha1.KVEngine {
 		secret, err := vaultClient.GetSecret(instance.Spec.Path, instance.Spec.Version, instance.Spec.VaultNamespace)
@@ -151,27 +148,27 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 
-		if existingSecret != nil {
-
-			certificateTTL := vaultClient.GetDefaultPKITTL()
-			if instance.Spec.EngineOptions != nil {
-				if ttl, ok := instance.Spec.EngineOptions["ttl"]; ok && ttl != "" {
-					parsedTTL, err := time.ParseDuration(ttl)
-					if err != nil {
-						log.Error(err, "Could not parse certificate TTL for PKI secret")
-					} else {
-						certificateTTL = parsedTTL
-					}
+		certificateTTL := vaultClient.GetDefaultPKITTL()
+		if instance.Spec.EngineOptions != nil {
+			if ttl, ok := instance.Spec.EngineOptions["ttl"]; ok && ttl != "" {
+				parsedTTL, err := time.ParseDuration(ttl)
+				if err != nil {
+					log.Error(err, "Could not parse certificate TTL for PKI secret")
+				} else {
+					certificateTTL = parsedTTL
 				}
 			}
+		}
+
+		if existingSecret != nil {
 
 			// Determine renewal decision
 			renewalThreshold := vaultClient.GetPKIRenewalThreshold()
 			renewalJitter := vaultClient.GetPKIRenewalJitter()
-			needsRenewal, renewalDate := needsCertificateRenewal(ctx, existingSecret, certificateTTL, renewalThreshold, renewalJitter)
+			needsRenewal, renewalDate, expiresAt := needsCertificateRenewal(ctx, existingSecret, certificateTTL, renewalThreshold, renewalJitter)
 
 			if !needsRenewal {
-				log.Info(fmt.Sprintf("No renewal required for PKI %s, will renew around %s", instance.Name, renewalDate.String()))
+				log.Info(fmt.Sprintf("No renewal required for PKI %s, will expire on %s, will renew around %s", instance.Name, expiresAt.String(), renewalDate.String()))
 				reconcileResult.RequeueAfter = time.Until(*renewalDate)
 				return reconcileResult, nil
 			}
@@ -180,7 +177,7 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// Generate new certificate
 		log.Info(fmt.Sprintf("Generating new PKI certificate for %s", instance.Name))
 		var secret *api.Secret
-		secret, expiresAt, err = vaultClient.GetCertificate(instance.Spec.Path, instance.Spec.Role, instance.Spec.EngineOptions)
+		secret, expiresAt, err := vaultClient.GetCertificate(instance.Spec.Path, instance.Spec.Role, instance.Spec.EngineOptions)
 		if err != nil {
 			log.Error(err, "Could not get certificate from vault")
 			r.updateConditions(ctx, instance, conditionReasonFetchFailed, err.Error(), metav1.ConditionFalse)
@@ -193,6 +190,9 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			r.updateConditions(ctx, instance, conditionReasonCreateFailed, err.Error(), metav1.ConditionFalse)
 			return ctrl.Result{}, err
 		}
+
+		log.Info(fmt.Sprintf("PKI Secret %s created, will expire on %s", instance.Name, expiresAt.String()))
+
 		// Do not set requeue now, will be set the next time we check the secret
 
 		// Database secret
@@ -204,7 +204,7 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		var secret *api.Secret
-		secret, expiresAt, err = vaultClient.GetDatabaseCreds(instance.Spec.Path, instance.Spec.Role)
+		secret, expiresAt, err := vaultClient.GetDatabaseCreds(instance.Spec.Path, instance.Spec.Role)
 		if err != nil {
 			log.Error(err, "Could not get database credentials from vault")
 			r.updateConditions(ctx, instance, conditionReasonFetchFailed, err.Error(), metav1.ConditionFalse)
@@ -218,13 +218,11 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 
-		requeueAfter = expiresAt.Sub(time.Now()) - vaultClient.DatabaseRenew
-	}
-
-	if expiresAt != nil {
-		reconcileResult.RequeueAfter = time.Until(*expiresAt)
-		log.Info(fmt.Sprintf("Secret %s will expire on %s", instance.Name, expiresAt.String()))
-		log.Info(fmt.Sprintf("Secret %s will be renewed on %s", instance.Name, time.Now().Add(requeueAfter).String()))
+		if expiresAt != nil {
+			reconcileResult.RequeueAfter = time.Until(*expiresAt)
+			log.Info(fmt.Sprintf("Secret %s will expire on %s", instance.Name, expiresAt.String()))
+			log.Info(fmt.Sprintf("Secret %s will be renewed on %s", instance.Name, time.Now().Add(reconcileResult.RequeueAfter).String()))
+		}
 	}
 
 	// Define a new Secret object
@@ -332,17 +330,17 @@ func computeRenewalDate(expiresAt *time.Time, certificateDuration time.Duration,
 
 // needsCertificateRenewal determines if a PKI certificate needs renewal
 // in case of an error, we return true to always renew the certificate just to be safe
-func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret, certificateDuration time.Duration, renewalThreshold float64, renewalJitter float64) (needsRenewal bool, renewalDate *time.Time) {
+func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret, certificateDuration time.Duration, renewalThreshold float64, renewalJitter float64) (needsRenewal bool, renewalDate, expiresAt *time.Time) {
 	log := logr.FromContext(ctx)
 	if existingSecret == nil {
 		// No existing secret found, renewal required
-		return true, nil
+		return true, nil, nil
 	}
 
 	expiresAt, err := getExpirationFromSecret(existingSecret)
 	if err != nil {
 		log.Error(err, "could not parse expiration for existing secret, renewal required")
-		return true, nil
+		return true, nil, nil
 	}
 
 	renewalDate = computeRenewalDate(expiresAt, certificateDuration, renewalThreshold, renewalJitter)
@@ -351,7 +349,7 @@ func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret,
 	now := time.Now()
 	needsRenewal = now.After(*renewalDate)
 
-	return needsRenewal, renewalDate
+	return needsRenewal, renewalDate, expiresAt
 }
 
 // getExistingSecret retrieves an existing Kubernetes secret, returning nil if not found
