@@ -42,12 +42,6 @@ const (
 	conditionInvalidResource    = "InvalidResource"
 )
 
-const (
-	defaultVaultPKITTL          = 100 * time.Hour // Default TTL for PKI certificates on our Vault instance
-	certificateRenewalThreshold = 0.3             // When the certificate is within 30% of its expiration, we renew it
-	renewalJitterPercentage     = 0.1             // We add a jitter of 10% to the renewal time, to avoid renewing at the same time
-)
-
 // VaultSecretReconciler reconciles a VaultSecret object
 type VaultSecretReconciler struct {
 	client.Client
@@ -157,7 +151,7 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 
-		certificateTTL := defaultVaultPKITTL
+		certificateTTL := vaultClient.GetDefaultPKITTL()
 		if instance.Spec.EngineOptions != nil {
 			if ttl, ok := instance.Spec.EngineOptions["ttl"]; ok && ttl != "" {
 				parsedTTL, err := time.ParseDuration(ttl)
@@ -170,7 +164,9 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		// Determine renewal decision
-		needsRenewal, renewalDate := needsCertificateRenewal(ctx, existingSecret, certificateTTL)
+		renewalThreshold := vaultClient.GetPKIRenewalThreshold()
+		renewalJitter := vaultClient.GetPKIRenewalJitter()
+		needsRenewal, renewalDate := needsCertificateRenewal(ctx, existingSecret, certificateTTL, renewalThreshold, renewalJitter)
 
 		if !needsRenewal {
 			log.Info(fmt.Sprintf("No renewal required for PKI %s, will renew around %s", instance.Name, renewalDate.String()))
@@ -310,15 +306,15 @@ func (r *VaultSecretReconciler) updateConditions(ctx context.Context, instance *
 	}
 }
 
-func computeRenewalDate(expiresAt *time.Time, certificateDuration time.Duration, addJitter bool) *time.Time {
+func computeRenewalDate(expiresAt *time.Time, certificateDuration time.Duration, renewalThreshold float64, renewalJitter float64) *time.Time {
 	// Generate final renewal lifetime percentage with jitter
-	// jitter ranges from -renewalJitterPercentage to +renewalJitterPercentage
+	// jitter ranges from -renewalJitter to +renewalJitter
 	jitter := 0.0
-	if addJitter {
-		jitter = (rand.Float64() - 0.5) * 2 * renewalJitterPercentage
+	if renewalJitter > 0 {
+		jitter = (rand.Float64() - 0.5) * 2 * renewalJitter
 	}
 
-	finalRenewalPercentage := 1 - (certificateRenewalThreshold + jitter)
+	finalRenewalPercentage := 1 - (renewalThreshold + jitter)
 
 	if finalRenewalPercentage < 0 {
 		panic("finalRenewalPercentage is negative, cannot compute renewal date")
@@ -336,7 +332,7 @@ func computeRenewalDate(expiresAt *time.Time, certificateDuration time.Duration,
 
 // needsCertificateRenewal determines if a PKI certificate needs renewal
 // in case of an error, we return true to always renew the certificate just to be safe
-func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret, certificateDuration time.Duration) (needsRenewal bool, renewalDate *time.Time) {
+func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret, certificateDuration time.Duration, renewalThreshold float64, renewalJitter float64) (needsRenewal bool, renewalDate *time.Time) {
 	log := logr.FromContext(ctx)
 	if existingSecret == nil {
 		// No existing secret found, renewal required
@@ -349,7 +345,7 @@ func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret,
 		return true, nil
 	}
 
-	renewalDate = computeRenewalDate(expiresAt, certificateDuration, true)
+	renewalDate = computeRenewalDate(expiresAt, certificateDuration, renewalThreshold, renewalJitter)
 
 	// Check if current date is after this threshold
 	now := time.Now()
