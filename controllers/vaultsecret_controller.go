@@ -151,27 +151,30 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 
-		certificateTTL := vaultClient.GetDefaultPKITTL()
-		if instance.Spec.EngineOptions != nil {
-			if ttl, ok := instance.Spec.EngineOptions["ttl"]; ok && ttl != "" {
-				parsedTTL, err := time.ParseDuration(ttl)
-				if err != nil {
-					log.Error(err, "Could not parse certificate TTL for PKI secret")
-				} else {
-					certificateTTL = parsedTTL
+		if existingSecret != nil {
+
+			certificateTTL := vaultClient.GetDefaultPKITTL()
+			if instance.Spec.EngineOptions != nil {
+				if ttl, ok := instance.Spec.EngineOptions["ttl"]; ok && ttl != "" {
+					parsedTTL, err := time.ParseDuration(ttl)
+					if err != nil {
+						log.Error(err, "Could not parse certificate TTL for PKI secret")
+					} else {
+						certificateTTL = parsedTTL
+					}
 				}
 			}
-		}
 
-		// Determine renewal decision
-		renewalThreshold := vaultClient.GetPKIRenewalThreshold()
-		renewalJitter := vaultClient.GetPKIRenewalJitter()
-		needsRenewal, renewalDate := needsCertificateRenewal(ctx, existingSecret, certificateTTL, renewalThreshold, renewalJitter)
+			// Determine renewal decision
+			renewalThreshold := vaultClient.GetPKIRenewalThreshold()
+			renewalJitter := vaultClient.GetPKIRenewalJitter()
+			needsRenewal, renewalDate := needsCertificateRenewal(ctx, existingSecret, certificateTTL, renewalThreshold, renewalJitter)
 
-		if !needsRenewal {
-			log.Info(fmt.Sprintf("No renewal required for PKI %s, will renew around %s", instance.Name, renewalDate.String()))
-			reconcileResult.RequeueAfter = time.Until(*renewalDate)
-			return reconcileResult, nil
+			if !needsRenewal {
+				log.Info(fmt.Sprintf("No renewal required for PKI %s, will renew around %s", instance.Name, renewalDate.String()))
+				reconcileResult.RequeueAfter = time.Until(*renewalDate)
+				return reconcileResult, nil
+			}
 		}
 
 		// Generate new certificate
@@ -190,6 +193,7 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			r.updateConditions(ctx, instance, conditionReasonCreateFailed, err.Error(), metav1.ConditionFalse)
 			return ctrl.Result{}, err
 		}
+		// Do not set requeue now, will be set the next time we check the secret
 
 		// Database secret
 	} else if instance.Spec.SecretEngine == ricobergerdev1alpha1.DatabaseEngine {
