@@ -3,8 +3,12 @@ package controllers
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"math/rand/v2"
 	"os"
+	"strconv"
 	"text/template"
 	"time"
 
@@ -36,6 +40,12 @@ const (
 	conditionReasonUpdateFailed = "UpdateFailed"
 	conditionReasonMergeFailed  = "MergeFailed"
 	conditionInvalidResource    = "InvalidResource"
+)
+
+const (
+	defaultVaultPKITTL          = 100 * time.Hour // Default TTL for PKI certificates on our Vault instance
+	certificateRenewalThreshold = 0.3             // When the certificate is within 30% of its expiration, we renew it
+	renewalJitterPercentage     = 0.1             // We add a jitter of 10% to the renewal time, to avoid renewing at the same time
 )
 
 // VaultSecretReconciler reconciles a VaultSecret object
@@ -116,6 +126,7 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	var expiresAt *time.Time
 	var requeueAfter time.Duration
 
+	// KV secret
 	if instance.Spec.SecretEngine == "" || instance.Spec.SecretEngine == ricobergerdev1alpha1.KVEngine {
 		secret, err := vaultClient.GetSecret(instance.Spec.Path, instance.Spec.Version, instance.Spec.VaultNamespace)
 		if err != nil {
@@ -130,6 +141,8 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			r.updateConditions(ctx, instance, conditionReasonCreateFailed, err.Error(), metav1.ConditionFalse)
 			return ctrl.Result{}, err
 		}
+
+		// PKI secret
 	} else if instance.Spec.SecretEngine == ricobergerdev1alpha1.PKIEngine {
 		if err := ValidatePKI(instance); err != nil {
 			log.Error(err, "Resource validation failed")
@@ -137,6 +150,36 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 
+		existingSecret, err := r.getExistingSecret(ctx, instance.Name, instance.Namespace)
+		if err != nil {
+			log.Error(err, "Error checking for existing secret")
+			r.updateConditions(ctx, instance, conditionReasonFetchFailed, err.Error(), metav1.ConditionFalse)
+			return ctrl.Result{}, err
+		}
+
+		certificateTTL := defaultVaultPKITTL
+		if instance.Spec.EngineOptions != nil {
+			if ttl, ok := instance.Spec.EngineOptions["ttl"]; ok && ttl != "" {
+				parsedTTL, err := time.ParseDuration(ttl)
+				if err != nil {
+					log.Error(err, "Could not parse certificate TTL for PKI secret")
+				} else {
+					certificateTTL = parsedTTL
+				}
+			}
+		}
+
+		// Determine renewal decision
+		needsRenewal, renewalDate := needsCertificateRenewal(ctx, existingSecret, certificateTTL)
+
+		if !needsRenewal {
+			log.Info(fmt.Sprintf("No renewal required for PKI %s, will renew around %s", instance.Name, renewalDate.String()))
+			reconcileResult.RequeueAfter = time.Until(*renewalDate)
+			return reconcileResult, nil
+		}
+
+		// Generate new certificate
+		log.Info(fmt.Sprintf("Generating new PKI certificate for %s", instance.Name))
 		var secret *api.Secret
 		secret, expiresAt, err = vaultClient.GetCertificate(instance.Spec.Path, instance.Spec.Role, instance.Spec.EngineOptions)
 		if err != nil {
@@ -152,7 +195,7 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 
-		requeueAfter = expiresAt.Sub(time.Now()) - vaultClient.PKIRenew
+		// Database secret
 	} else if instance.Spec.SecretEngine == ricobergerdev1alpha1.DatabaseEngine {
 		if err := ValidateDatabase(instance); err != nil {
 			log.Error(err, "Resource validation failed")
@@ -179,8 +222,7 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	if expiresAt != nil {
-		r.updateExpiration(ctx, instance, expiresAt)
-		reconcileResult.RequeueAfter = expiresAt.Sub(time.Now())
+		reconcileResult.RequeueAfter = time.Until(*expiresAt)
 		log.Info(fmt.Sprintf("Secret %s will expire on %s", instance.Name, expiresAt.String()))
 		log.Info(fmt.Sprintf("Secret %s will be renewed on %s", instance.Name, time.Now().Add(requeueAfter).String()))
 	}
@@ -201,9 +243,14 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Check if this Secret already exists
-	found := &corev1.Secret{}
-	err = r.Get(ctx, types.NamespacedName{Name: secret.Name, Namespace: secret.Namespace}, found)
-	if err != nil && errors.IsNotFound(err) {
+	found, err := r.getExistingSecret(ctx, secret.Name, secret.Namespace)
+	if err != nil {
+		log.Error(err, "Could not check for existing secret")
+		r.updateConditions(ctx, instance, conditionReasonCreateFailed, err.Error(), metav1.ConditionFalse)
+		return ctrl.Result{}, err
+	}
+
+	if found == nil {
 		log.Info("Creating a new Secret", "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
 		err = r.Create(ctx, secret)
 		if err != nil {
@@ -215,10 +262,6 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// Secret created successfully - requeue only if no version is specified
 		r.updateConditions(ctx, instance, conditionReasonCreated, "Secret was created", metav1.ConditionTrue)
 		return reconcileResult, nil
-	} else if err != nil {
-		log.Error(err, "Could not create secret")
-		r.updateConditions(ctx, instance, conditionReasonCreateFailed, err.Error(), metav1.ConditionFalse)
-		return ctrl.Result{}, err
 	}
 
 	// Secret already exists, update the secret
@@ -249,17 +292,6 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return reconcileResult, nil
 }
 
-func (r *VaultSecretReconciler) updateExpiration(ctx context.Context, instance *ricobergerdev1alpha1.VaultSecret, expiresAt *time.Time) {
-	return
-	//instance.Status.Expires = true
-	//instance.Status.ExpiresAt = expiresAt.String()
-
-	//err := r.Status().Update(ctx, instance)
-	//if err != nil {
-	//	log.Error(err, "Could not update expiration in status")
-	//}
-}
-
 func (r *VaultSecretReconciler) updateConditions(ctx context.Context, instance *ricobergerdev1alpha1.VaultSecret, reason, message string, status metav1.ConditionStatus) {
 	//instance.Status.Expires = true
 	//instance.Status.ExpiresAt = time.Now().Add(time.Second * 30).String()
@@ -276,6 +308,120 @@ func (r *VaultSecretReconciler) updateConditions(ctx context.Context, instance *
 	if err != nil {
 		logr.FromContext(ctx).Error(err, "Could not update status")
 	}
+}
+
+func computeRenewalDate(expiresAt *time.Time, certificateDuration time.Duration, addJitter bool) *time.Time {
+	// Generate final renewal lifetime percentage with jitter
+	// jitter ranges from -renewalJitterPercentage to +renewalJitterPercentage
+	jitter := 0.0
+	if addJitter {
+		jitter = (rand.Float64() - 0.5) * 2 * renewalJitterPercentage
+	}
+
+	finalRenewalPercentage := 1 - (certificateRenewalThreshold + jitter)
+
+	if finalRenewalPercentage < 0 {
+		panic("finalRenewalPercentage is negative, cannot compute renewal date")
+	}
+
+	// Calculate creation date: expiration - certificate duration
+	creationDate := expiresAt.Add(-certificateDuration)
+
+	// Compute renewal date using the final percentage * certificate duration
+	renewalDuration := time.Duration(float64(certificateDuration) * finalRenewalPercentage)
+	renewalDate := creationDate.Add(renewalDuration)
+
+	return &renewalDate
+}
+
+// needsCertificateRenewal determines if a PKI certificate needs renewal
+// in case of an error, we return true to always renew the certificate just to be safe
+func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret, certificateDuration time.Duration) (needsRenewal bool, renewalDate *time.Time) {
+	log := logr.FromContext(ctx)
+	if existingSecret == nil {
+		// No existing secret found, renewal required
+		return true, nil
+	}
+
+	expiresAt, err := getExpirationFromSecret(existingSecret)
+	if err != nil {
+		log.Error(err, "could not parse expiration for existing secret, renewal required")
+		return true, nil
+	}
+
+	renewalDate = computeRenewalDate(expiresAt, certificateDuration, true)
+
+	// Check if current date is after this threshold
+	now := time.Now()
+	needsRenewal = now.After(*renewalDate)
+
+	return needsRenewal, renewalDate
+}
+
+// getExistingSecret retrieves an existing Kubernetes secret, returning nil if not found
+func (r *VaultSecretReconciler) getExistingSecret(ctx context.Context, name, namespace string) (*corev1.Secret, error) {
+	secret := &corev1.Secret{}
+	secretKey := types.NamespacedName{Name: name, Namespace: namespace}
+
+	err := r.Get(ctx, secretKey, secret)
+	if err != nil && errors.IsNotFound(err) {
+		return nil, nil // Not found, but not an error
+	} else if err != nil {
+		return nil, err // Actual error
+	}
+
+	return secret, nil
+}
+
+// getExpirationFromSecret extracts the expiration time from a PKI secret
+func getExpirationFromSecret(secret *corev1.Secret) (*time.Time, error) {
+	// First, try to get expiration field directly (primary method)
+	if expirationData, exists := secret.Data["expiration"]; exists {
+		if expirationUnix, err := strconv.ParseInt(string(expirationData), 10, 64); err == nil {
+			expirationTime := time.Unix(expirationUnix, 0)
+			return &expirationTime, nil
+		}
+	}
+
+	// Fallback: parse X.509 certificate for expiration
+	certData := getCertificateData(secret)
+	if certData == nil {
+		return nil, fmt.Errorf("no expiration field or certificate data found in secret")
+	}
+
+	expirationTime, err := parseCertificateExpiration(certData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse X.509 certificate: %v", err)
+	}
+
+	return expirationTime, nil
+}
+
+// getCertificateData extracts certificate data from a secret
+func getCertificateData(secret *corev1.Secret) []byte {
+	// For the moment, we always template certificato to tls.crt key. If this change, you might need to edit this function.
+	if certData, exists := secret.Data["tls.crt"]; exists {
+		return certData
+	}
+	if certData, exists := secret.Data["certificate"]; exists {
+		return certData
+	}
+	return nil
+}
+
+// parseCertificateExpiration parses X.509 certificate expiration from PEM data
+func parseCertificateExpiration(certData []byte) (*time.Time, error) {
+	block, _ := pem.Decode(certData)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM certificate")
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse X.509 certificate: %v", err)
+	}
+
+	return &cert.NotAfter, nil
 }
 
 // ignorePredicate is used to ignore updates to CR status in which case metadata.Generation does not change.
@@ -381,7 +527,7 @@ func newSecretForCR(cr *ricobergerdev1alpha1.VaultSecret, data map[string][]byte
 		for k, v := range cr.Spec.Templates {
 			templated, err := runTemplate(cr, v, data)
 			if err != nil {
-				return nil, fmt.Errorf("Template ERROR: %w", err)
+				return nil, fmt.Errorf("template error: %w", err)
 			}
 			newdata[k] = templated
 		}
