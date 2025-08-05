@@ -40,6 +40,9 @@ const (
 	conditionReasonUpdateFailed = "UpdateFailed"
 	conditionReasonMergeFailed  = "MergeFailed"
 	conditionInvalidResource    = "InvalidResource"
+
+	// Annotation key for storing VaultSecret spec hash
+	annotationSpecHash = "vault-secrets-operator.ricoberger.de/vaultsecret-spec-hash"
 )
 
 // VaultSecretReconciler reconciles a VaultSecret object
@@ -161,16 +164,27 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		if existingSecret != nil {
+			// Check if spec has changed by comparing hashes
+			currentSpecHash := instance.Spec.Hash()
 
-			// Determine renewal decision
-			renewalThreshold := vaultClient.GetPKIRenewalThreshold()
-			renewalJitter := vaultClient.GetPKIRenewalJitter()
-			needsRenewal, renewalDate, expiresAt := needsCertificateRenewal(ctx, existingSecret, certificateTTL, renewalThreshold, renewalJitter)
+			storedHash, exists := existingSecret.Annotations[annotationSpecHash]
+			if exists && storedHash != currentSpecHash {
+				log.Info(fmt.Sprintf("Spec changed for PKI %s, regenerating certificate", instance.Name))
+				// Force regeneration by continuing to certificate generation
+			} else {
+				// Spec hasn't changed or annotation doesn't exist, use time-based renewal logic
+				// We don't want to trigger a PKI request storm for all existing secrets without the annotation, so we only
+				// add it during the next necessary renewal.
+				renewalThreshold := vaultClient.GetPKIRenewalThreshold()
+				renewalJitter := vaultClient.GetPKIRenewalJitter()
+				needsRenewal, renewalDate, expiresAt := needsCertificateRenewal(ctx, existingSecret, certificateTTL, renewalThreshold, renewalJitter)
 
-			if !needsRenewal {
-				log.Info(fmt.Sprintf("No renewal required for PKI %s, will expire on %s, will renew around %s", instance.Name, expiresAt.String(), renewalDate.String()))
-				reconcileResult.RequeueAfter = time.Until(*renewalDate)
-				return reconcileResult, nil
+				if !needsRenewal {
+					log.Info(fmt.Sprintf("No renewal required for PKI %s, will expire on %s, will renew around %s", instance.Name, expiresAt.String(), renewalDate.String()))
+					reconcileResult.RequeueAfter = time.Until(*renewalDate)
+					return reconcileResult, nil
+				}
+				log.Info(fmt.Sprintf("Renewal required for PKI %s, will expire on %s", instance.Name, expiresAt.String()))
 			}
 		}
 
@@ -514,6 +528,11 @@ func newSecretForCR(cr *ricobergerdev1alpha1.VaultSecret, data map[string][]byte
 	annotations := map[string]string{}
 	for k, v := range cr.ObjectMeta.Annotations {
 		annotations[k] = v
+	}
+
+	// Add spec hash annotation for PKI secrets
+	if cr.Spec.SecretEngine == ricobergerdev1alpha1.PKIEngine {
+		annotations[annotationSpecHash] = cr.Spec.Hash()
 	}
 
 	if cr.Spec.Templates != nil {
