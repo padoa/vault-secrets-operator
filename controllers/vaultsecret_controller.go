@@ -314,18 +314,14 @@ func computeRenewalDate(expiresAt *time.Time, certificateDuration time.Duration,
 		jitter = (rand.Float64() - 0.5) * 2 * renewalJitter
 	}
 
-	finalRenewalPercentage := 1 - (renewalThreshold + jitter)
+	finalRenewalPercentage := renewalThreshold + jitter
 
-	if finalRenewalPercentage < 0 {
-		panic("finalRenewalPercentage is negative, cannot compute renewal date")
+	if finalRenewalPercentage > 1 || finalRenewalPercentage < 0 {
+		panic(fmt.Sprintf("finalRenewalPercentage is out of bounds: %f", finalRenewalPercentage))
 	}
 
-	// Calculate creation date: expiration - certificate duration
-	creationDate := expiresAt.Add(-certificateDuration)
-
-	// Compute renewal date using the final percentage * certificate duration
-	renewalDuration := time.Duration(float64(certificateDuration) * finalRenewalPercentage)
-	renewalDate := creationDate.Add(renewalDuration)
+	maxRemainingTimeBeforeRenewal := time.Duration(float64(certificateDuration) * finalRenewalPercentage)
+	renewalDate := expiresAt.Add(-maxRemainingTimeBeforeRenewal)
 
 	return &renewalDate
 }
