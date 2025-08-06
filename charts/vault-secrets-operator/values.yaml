@@ -7,7 +7,8 @@ image:
   # digest: sha256:7246830da1852a7417cccc1092beecdf524d9eb9fb7b29aabcf10796cccb3def
 
   pullPolicy: IfNotPresent
-  volumeMounts: []
+  volumeMounts:
+    []
     # - name: ca
     #   mountPath: "/etc/vault-secrets-operator"
 
@@ -18,7 +19,8 @@ fullnameOverride: ""
 args:
   - -leader-elect
 
-environmentVars: []
+environmentVars:
+  []
   # Set environment variables from a secret. This must be done, if you use the
   # Token or AppRole Auth Methods of Vault.
 
@@ -76,6 +78,8 @@ environmentVars: []
 # comma separated list via the namespaces value. If the value is empty the operator
 # will watch all namespaces. If the value is empty and rbac.namespaced is set to
 # true, then the namespace of the release will be used.
+# The maxConcurrentReconciles value determines the maximum number of concurrent
+# reconcile operations for VaultSecret resources. Default is 1.
 vault:
   address: ""
   header: ""
@@ -96,6 +100,7 @@ vault:
   gcpRole: vault-secrets-operator
   reconciliationTime: 0
   namespaces: ""
+  maxConcurrentReconciles: 1
 
 rbac:
   create: true
@@ -122,7 +127,8 @@ testPodAnnotations: {}
 # Additional labels for the vault-secrets-operator-test-connection pod
 testPodLabels: {}
 
-resources: {}
+resources:
+  {}
   # We usually recommend not to specify default resources and to leave this as a conscious
   # choice for the user. This also increases chances charts run on environments with little
   # resources, such as Minikube. If you do want to specify resources, uncomment the following
@@ -134,7 +140,8 @@ resources: {}
   #   cpu: 100m
   #   memory: 128Mi
 
-volumes: []
+volumes:
+  []
   # - name: ca
   #   secret:
   #     secretName: vault-secrets-operator-ca
@@ -173,7 +180,8 @@ serviceMonitor:
 
 networkPolicy:
   enabled: false
-  egress: []
+  egress:
+    []
     # - to:
     #     - ipBlock:
     #       cidr: 10.0.0.0/24
@@ -184,7 +192,8 @@ networkPolicy:
 ## Topology spread constraints rely on node labels to identify the topology domain(s) that each Node is in.
 ## Ref: https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/
 ##
-topologySpreadConstraints: []
+topologySpreadConstraints:
+  []
   # - maxSkew: 1
   #   topologyKey: topology.kubernetes.io/zone
   #   whenUnsatisfiable: DoNotSchedule

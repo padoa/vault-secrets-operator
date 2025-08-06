@@ -442,10 +442,10 @@ func ignorePredicate() predicate.Predicate {
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *VaultSecretReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *VaultSecretReconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconciles int) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 6, // We launch a dice, it want to 6
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		For(&ricobergerdev1alpha1.VaultSecret{}).
 		Owns(&corev1.Secret{}).

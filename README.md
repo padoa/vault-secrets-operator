@@ -20,6 +20,25 @@ helm repo update
 helm upgrade --install vault-secrets-operator ricoberger/vault-secrets-operator
 ```
 
+### Configuration
+
+#### Concurrency
+
+The operator supports configurable concurrency for reconciling VaultSecret resources. You can control this via:
+
+**Environment Variable:**
+```sh
+export MAX_CONCURRENT_RECONCILES=5
+```
+
+**Helm Chart:**
+```sh
+helm upgrade --install vault-secrets-operator ricoberger/vault-secrets-operator \
+  --set vault.maxConcurrentReconciles=5
+```
+
+Default value is `1`. Higher values increase throughput but consume more resources on external services such as Vault and Kubernetes API server.
+
 ### Prepare Vault
 
 The Vault Secrets Operator supports the **KV Secrets Engine - Version 1** and **KV Secrets Engine - Version 2**. To create a new secret engine under a path named `kvv1` and `kvv2`, you can run the following command:
@@ -699,6 +718,7 @@ export VAULT_AUTH_METHOD=token
 export VAULT_TOKEN=
 export VAULT_TOKEN_LEASE_DURATION=86400
 export VAULT_RECONCILIATION_TIME=180
+export MAX_CONCURRENT_RECONCILES=1
 ```
 
 Deploy the CRD and run the operator locally with the default Kubernetes config file present at `$HOME/.kube/config`:

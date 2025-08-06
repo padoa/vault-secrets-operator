@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	ricobergerdev1alpha1 "github.com/ricoberger/vault-secrets-operator/api/v1alpha1"
@@ -97,10 +98,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	maxConcurrentReconciles := getMaxConcurrentReconciles()
+
 	if err = (&controllers.VaultSecretReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr, maxConcurrentReconciles); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VaultSecret")
 		os.Exit(1)
 	}
@@ -148,4 +151,24 @@ func getWatchNamespace() (string, error) {
 		return "", fmt.Errorf("%s must be set", watchNamespaceEnvVar)
 	}
 	return ns, nil
+}
+
+// getMaxConcurrentReconciles returns the maximum number of concurrent reconciles for the controller
+func getMaxConcurrentReconciles() int {
+	// MaxConcurrentReconcilesEnvVar is the constant for env variable MAX_CONCURRENT_RECONCILES
+	// which specifies the maximum number of concurrent reconciles. Defaults to 1 if not set.
+	var maxConcurrentReconcilesEnvVar = "MAX_CONCURRENT_RECONCILES"
+	defaultValue := 1
+
+	if maxConcurrentReconcilesStr := os.Getenv(maxConcurrentReconcilesEnvVar); maxConcurrentReconcilesStr != "" {
+		if maxConcurrentReconciles, err := strconv.Atoi(maxConcurrentReconcilesStr); err == nil && maxConcurrentReconciles > 0 {
+			setupLog.Info("Using configured max concurrent reconciles", "value", maxConcurrentReconciles)
+			return maxConcurrentReconciles
+		} else {
+			setupLog.Info("Invalid MAX_CONCURRENT_RECONCILES value", "invalid_value", maxConcurrentReconcilesStr)
+		}
+	}
+
+	setupLog.Info("Using default max concurrent reconciles", "value", defaultValue)
+	return defaultValue
 }
