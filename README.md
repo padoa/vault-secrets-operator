@@ -20,6 +20,25 @@ helm repo update
 helm upgrade --install vault-secrets-operator ricoberger/vault-secrets-operator
 ```
 
+### Configuration
+
+#### Concurrency
+
+The operator supports configurable concurrency for reconciling VaultSecret resources. You can control this via:
+
+**Environment Variable:**
+```sh
+export MAX_CONCURRENT_RECONCILES=5
+```
+
+**Helm Chart:**
+```sh
+helm upgrade --install vault-secrets-operator ricoberger/vault-secrets-operator \
+  --set vault.maxConcurrentReconciles=5
+```
+
+Default value is `1`. Higher values increase throughput but consume more resources on external services such as Vault and Kubernetes API server.
+
 ### Prepare Vault
 
 The Vault Secrets Operator supports the **KV Secrets Engine - Version 1** and **KV Secrets Engine - Version 2**. To create a new secret engine under a path named `kvv1` and `kvv2`, you can run the following command:
@@ -580,8 +599,19 @@ The following fields are available:
 
 #### Certificate Renewal
 
-Certificate are renewed before expiration. You can set how long before expiration you want to renew by setting the
-`VAULT_PKI_RENEW` environment variable. The default is 1 hour.
+Certificates are renewed before expiration based on configurable parameters. You can control the renewal behavior using the following environment variables:
+
+- `VAULT_PKI_DEFAULT_TTL`: Default TTL for PKI certificates when not specified in the VaultSecret spec. Default is `100h` (100 hours), which match the default TTL for PKI certificates in our Vault PKI engines.
+- `VAULT_PKI_RENEWAL_THRESHOLD`: Certificate renewal threshold as a percentage (0-1). When the certificate is within this percentage of its remaining lifetime, it will be renewed. Default is `0.3` (30%).
+- `VAULT_PKI_RENEWAL_JITTER`: Renewal jitter percentage (0-1) to avoid renewing certificates at the same time. Default is `0.1` (10%). Therefore the renewal will be scheduled between `VAULT_PKI_RENEWAL_THRESHOLD - VAULT_PKI_RENEWAL_JITTER` and `VAULT_PKI_RENEWAL_THRESHOLD + VAULT_PKI_RENEWAL_JITTER` of the certificate's remaining lifetime.
+
+For example, with the following configuration:
+
+- certificate TTL: 10 days
+- renewal threshold: 30% (default)
+- renewal jitter: 10% (default)
+
+The certificate will be renewed 3 (+- 1) days before expiration.
 
 ### Using specific Vault Role for secrets
 
@@ -688,6 +718,7 @@ export VAULT_AUTH_METHOD=token
 export VAULT_TOKEN=
 export VAULT_TOKEN_LEASE_DURATION=86400
 export VAULT_RECONCILIATION_TIME=180
+export MAX_CONCURRENT_RECONCILES=1
 ```
 
 Deploy the CRD and run the operator locally with the default Kubernetes config file present at `$HOME/.kube/config`:
