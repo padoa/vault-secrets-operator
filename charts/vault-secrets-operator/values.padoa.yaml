@@ -20,7 +20,7 @@ vault:
 
 image:
   repository: padoa.azurecr.io/padoa-tools/vault-secrets-operator
-  tag: master
+  tag: 7c34f33a722980d718ff6cceca4ee3103abf6d79
   pullPolicy: Always
 
 serviceMonitor:
