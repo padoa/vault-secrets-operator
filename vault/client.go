@@ -39,12 +39,10 @@ type Client struct {
 	// failedRenewTokenAttempts is the number of failed renew token attempts, if the renew token function fails 5 times
 	// the liveness probe will fail, to force a restart of the operator.
 	failedRenewTokenAttempts int
+	// PKIRenew minimum remaining period of validity before certificate renewal
+	PKIRenew time.Duration
 	// DatabaseRenew is the minimum remaining period of validity before credential renewal
 	DatabaseRenew time.Duration
-	// PKI configuration constants
-	defaultPKITTL       time.Duration // Default TTL for PKI certificates, depends on Engine configuration
-	pkiRenewalThreshold float64       // Certificate renewal threshold (0-1)
-	pkiRenewalJitter    float64       // Renewal jitter percentage (0-1), added +- to the renewal threshold
 }
 
 // PerformRenewToken returns whether the operator should renew its token
@@ -259,17 +257,6 @@ func (c *Client) addPrefixToVKVPath(p, mountPath, apiPrefix string) string {
 	}
 }
 
-// GetDefaultPKITTL returns the default PKI certificate TTL
-func (c *Client) GetDefaultPKITTL() time.Duration {
-	return c.defaultPKITTL
-}
-
-// GetPKIRenewalThreshold returns the PKI certificate renewal threshold
-func (c *Client) GetPKIRenewalThreshold() float64 {
-	return c.pkiRenewalThreshold
-}
-
-// GetPKIRenewalJitter returns the PKI certificate renewal jitter percentage
-func (c *Client) GetPKIRenewalJitter() float64 {
-	return c.pkiRenewalJitter
+func (c *Client) GetPKIRenew() time.Duration {
+	return c.PKIRenew
 }

@@ -95,9 +95,7 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 	vaultGcpServiceAccountEmail := os.Getenv("VAULT_GCP_SERVICE_ACCOUNT_EMAIL")
 	vaultTokenMaxTTL := os.Getenv("VAULT_TOKEN_MAX_TTL")
 	vaultNamespace := os.Getenv("VAULT_NAMESPACE")
-	vaultPKIDefaultTTL := os.Getenv("VAULT_PKI_DEFAULT_TTL")
-	vaultPKIRenewalThreshold := os.Getenv("VAULT_PKI_RENEWAL_THRESHOLD")
-	vaultPKIRenewalJitter := os.Getenv("VAULT_PKI_RENEWAL_JITTER")
+	vaultPKIRenew := os.Getenv("VAULT_PKI_RENEW")
 	vaultDatabaseRenew := os.Getenv("VAULT_DATABASE_RENEW")
 	vaultAzureMsiObjectID := os.Getenv("AZURE_MSI_OBJECT_ID")
 
@@ -117,50 +115,17 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 		renewToken = true
 	}
 
-	// Parse PKI configuration with defaults
-	if len(vaultPKIDefaultTTL) == 0 {
-		vaultPKIDefaultTTL = "100h" // 100 hours default
-	}
-
-	if len(vaultPKIRenewalThreshold) == 0 {
-		vaultPKIRenewalThreshold = "0.3" // 30% threshold default
-	}
-
-	if len(vaultPKIRenewalJitter) == 0 {
-		vaultPKIRenewalJitter = "0.1" // 10% jitter default
+	if len(vaultPKIRenew) == 0 {
+		vaultPKIRenew = "1h"
 	}
 
 	if len(vaultDatabaseRenew) == 0 {
 		vaultDatabaseRenew = "15m"
 	}
 
-	defaultPKITTL, err := time.ParseDuration(vaultPKIDefaultTTL)
+	PKIRenew, err := time.ParseDuration(vaultPKIRenew)
 	if err != nil {
-		return nil, fmt.Errorf("invalid VAULT_PKI_DEFAULT_TTL: %v", err)
-	}
-
-	pkiRenewalThreshold, err := strconv.ParseFloat(vaultPKIRenewalThreshold, 64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid VAULT_PKI_RENEWAL_THRESHOLD: %v", err)
-	}
-	if pkiRenewalThreshold < 0 || pkiRenewalThreshold > 1 {
-		return nil, fmt.Errorf("VAULT_PKI_RENEWAL_THRESHOLD must be between 0 and 1, got: %f", pkiRenewalThreshold)
-	}
-
-	pkiRenewalJitter, err := strconv.ParseFloat(vaultPKIRenewalJitter, 64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid VAULT_PKI_RENEWAL_JITTER: %v", err)
-	}
-	if pkiRenewalJitter < 0 || pkiRenewalJitter > 1 {
-		return nil, fmt.Errorf("VAULT_PKI_RENEWAL_JITTER must be between 0 and 1, got: %f", pkiRenewalJitter)
-	}
-
-	// Check that pkiRenewalThreshold ± pkiRenewalJitter stays within [0, 1]
-	if pkiRenewalThreshold+pkiRenewalJitter > 1 {
-		return nil, fmt.Errorf("VAULT_PKI_RENEWAL_THRESHOLD + VAULT_PKI_RENEWAL_JITTER must be <= 1, got: %f", pkiRenewalThreshold+pkiRenewalJitter)
-	}
-	if pkiRenewalThreshold-pkiRenewalJitter < 0 {
-		return nil, fmt.Errorf("VAULT_PKI_RENEWAL_THRESHOLD - VAULT_PKI_RENEWAL_JITTER must be >= 0, got: %f", pkiRenewalThreshold-pkiRenewalJitter)
+		return nil, err
 	}
 
 	databaseRenew, err := time.ParseDuration(vaultDatabaseRenew)
@@ -219,9 +184,7 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 			tokenRenewalInterval:      tokenRenewalInterval,
 			tokenRenewalRetryInterval: tokenRenewalRetryInterval,
 			rootVaultNamespace:        vaultNamespace,
-			defaultPKITTL:             defaultPKITTL,
-			pkiRenewalThreshold:       pkiRenewalThreshold,
-			pkiRenewalJitter:          pkiRenewalJitter,
+			PKIRenew:                  PKIRenew,
 			DatabaseRenew:             databaseRenew,
 		}, nil
 	}
@@ -283,9 +246,7 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 			tokenRenewalInterval:      tokenRenewalInterval,
 			tokenRenewalRetryInterval: tokenRenewalRetryInterval,
 			rootVaultNamespace:        vaultNamespace,
-			defaultPKITTL:             defaultPKITTL,
-			pkiRenewalThreshold:       pkiRenewalThreshold,
-			pkiRenewalJitter:          pkiRenewalJitter,
+			PKIRenew:                  PKIRenew,
 			DatabaseRenew:             databaseRenew,
 		}, nil
 	}
@@ -365,10 +326,8 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 				}
 				return nil
 			},
-			defaultPKITTL:       defaultPKITTL,
-			pkiRenewalThreshold: pkiRenewalThreshold,
-			pkiRenewalJitter:    pkiRenewalJitter,
-			DatabaseRenew:       databaseRenew,
+			PKIRenew:      PKIRenew,
+			DatabaseRenew: databaseRenew,
 		}, nil
 	}
 
@@ -440,9 +399,7 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 			tokenRenewalInterval:      tokenRenewalInterval,
 			tokenRenewalRetryInterval: tokenRenewalRetryInterval,
 			rootVaultNamespace:        vaultNamespace,
-			defaultPKITTL:             defaultPKITTL,
-			pkiRenewalThreshold:       pkiRenewalThreshold,
-			pkiRenewalJitter:          pkiRenewalJitter,
+			PKIRenew:                  PKIRenew,
 			DatabaseRenew:             databaseRenew,
 		}, nil
 
@@ -633,10 +590,8 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 				}
 				return nil
 			},
-			defaultPKITTL:       defaultPKITTL,
-			pkiRenewalThreshold: pkiRenewalThreshold,
-			pkiRenewalJitter:    pkiRenewalJitter,
-			DatabaseRenew:       databaseRenew,
+			PKIRenew:      PKIRenew,
+			DatabaseRenew: databaseRenew,
 		}, nil
 	}
 
@@ -775,10 +730,8 @@ func CreateClient(vaultKubernetesRole string) (*Client, error) {
 				}
 				return nil
 			},
-			defaultPKITTL:       defaultPKITTL,
-			pkiRenewalThreshold: pkiRenewalThreshold,
-			pkiRenewalJitter:    pkiRenewalJitter,
-			DatabaseRenew:       databaseRenew,
+			PKIRenew:      PKIRenew,
+			DatabaseRenew: databaseRenew,
 		}, nil
 	}
 
