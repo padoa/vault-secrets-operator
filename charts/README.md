@@ -28,6 +28,7 @@
 | `vault.gcpRole` | The name of the role which is configured for the GCP auth method. | `vault-secrets-operator` |
 | `vault.appRolePath` | If the AppRole auth method is used, this is the path where the AppRole auth method is enabled. | `auth/approle` |
 | `vault.reconciliationTime` | The time after which the reconcile function for the CR is rerun. If the value is 0, automatic reconciliation is skipped. | `0` |
+| `vault.maxConcurrentReconciles` | Maximum number of concurrent reconcile operations for VaultSecret resources. | `1` |
 | `vault.namespaces` | Comma serpareted list of namespaces the operator will watch. If empty the operator will watch all namespaces. | `""` |
 | `rbac.create` | Create RBAC object, enable (Cluster)Role and (Cluster)Role binding creation. | `true` |
 | `rbac.createrole` | Finetune RBAC, enable or disable (Cluster)Role creation. NOTE: ignored when `rbac.create` is not `true`. | `true` |

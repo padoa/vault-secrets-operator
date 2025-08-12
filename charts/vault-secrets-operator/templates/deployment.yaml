@@ -97,6 +97,8 @@ spec:
               value: {{ .Values.vault.gcpServiceAccountEmail | quote }}
             - name: VAULT_GCP_ROLE
               value: {{ .Values.vault.gcpRole | quote }}
+            - name: MAX_CONCURRENT_RECONCILES
+              value: {{ .Values.vault.maxConcurrentReconciles | quote }}
 
             {{- with .Values.environmentVars }}
             {{- toYaml . | nindent 12 }}
