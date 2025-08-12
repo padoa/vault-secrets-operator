@@ -1,10 +1,6 @@
 package v1alpha1
 
 import (
-	"crypto/sha256"
-	"encoding/json"
-	"fmt"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -70,22 +66,6 @@ type VaultSecretSpec struct {
 	// get double encoded. This flag will skip the base64 encode which is needed
 	// for string data to avoid the double encode problem.
 	IsBinary bool `json:"isBinary,omitempty"`
-}
-
-// Hash returns a deterministic SHA256 hash of the VaultSecretSpec
-// This handles all fields including maps in a deterministic way by using JSON marshaling
-func (v *VaultSecretSpec) Hash() string {
-	// Use JSON marshaling to get a deterministic representation
-	// JSON marshal automatically sorts map keys, ensuring deterministic output
-	jsonBytes, err := json.Marshal(v)
-	if err != nil {
-		// This should never happen for a valid struct, but fallback to empty string
-		return ""
-	}
-
-	h := sha256.New()
-	h.Write(jsonBytes)
-	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // VaultSecretStatus defines the observed state of VaultSecret
