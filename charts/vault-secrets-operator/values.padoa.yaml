@@ -16,11 +16,11 @@ vault:
   # The maxConcurrentReconciles value determines the maximum number of concurrent
   # reconcile operations for VaultSecret resources. Higher is faster, but can cause
   # more load on Vault server and AKS API server.
-  maxConcurrentReconciles: 1
+  maxConcurrentReconciles: 3
 
 image:
   repository: padoa.azurecr.io/padoa-tools/vault-secrets-operator
-  tag: 7c34f33a722980d718ff6cceca4ee3103abf6d79
+  tag: master
   pullPolicy: Always
 
 serviceMonitor:
