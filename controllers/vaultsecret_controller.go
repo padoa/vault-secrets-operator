@@ -108,16 +108,17 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			r.updateConditions(ctx, instance, conditionReasonFetchFailed, err.Error(), metav1.ConditionFalse)
 			return ctrl.Result{}, err
 		}
-	} else {
+	}
+	
+	if vaultClient == nil {
 		log.Info("Use shared client to get secret from Vault")
 		if vault.SharedClient == nil {
 			err = fmt.Errorf("shared client not initialized and vaultRole property missing")
 			log.Error(err, "Could not get secret from Vault")
 			r.updateConditions(ctx, instance, conditionReasonFetchFailed, err.Error(), metav1.ConditionFalse)
 			return ctrl.Result{}, err
-		} else {
-			vaultClient = vault.SharedClient
 		}
+		vaultClient = vault.SharedClient
 	}
 
 	// KV secret
@@ -180,11 +181,19 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				needsRenewal, renewalDate, expiresAt := needsCertificateRenewal(ctx, existingSecret, certificateTTL, renewalThreshold, renewalJitter)
 
 				if !needsRenewal {
-					log.Info(fmt.Sprintf("No renewal required for PKI %s, will expire on %s, will renew around %s", instance.Name, expiresAt.String(), renewalDate.String()))
-					reconcileResult.RequeueAfter = time.Until(*renewalDate)
+					if expiresAt != nil && renewalDate != nil {
+						log.Info(fmt.Sprintf("No renewal required for PKI %s, will expire on %s, will renew around %s", instance.Name, expiresAt.String(), renewalDate.String()))
+						reconcileResult.RequeueAfter = time.Until(*renewalDate)
+					} else {
+						log.Info(fmt.Sprintf("No renewal required for PKI %s (expiration data unavailable)", instance.Name))
+					}
 					return reconcileResult, nil
 				}
-				log.Info(fmt.Sprintf("Renewal required for PKI %s, will expire on %s", instance.Name, expiresAt.String()))
+				if expiresAt != nil {
+					log.Info(fmt.Sprintf("Renewal required for PKI %s, will expire on %s", instance.Name, expiresAt.String()))
+				} else {
+					log.Info(fmt.Sprintf("Renewal required for PKI %s (expiration data unavailable, regenerating)", instance.Name))
+				}
 			}
 		}
 
@@ -205,7 +214,11 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 
-		log.Info(fmt.Sprintf("PKI Secret %s created, will expire on %s", instance.Name, expiresAt.String()))
+		if expiresAt != nil {
+			log.Info(fmt.Sprintf("PKI Secret %s created, will expire on %s", instance.Name, expiresAt.String()))
+		} else {
+			log.Info(fmt.Sprintf("PKI Secret %s created (expiration date will be determined from certificate)", instance.Name))
+		}
 
 		// Do not set requeue now, will be set the next time we check the secret
 
@@ -348,12 +361,13 @@ func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret,
 	log := logr.FromContext(ctx)
 	if existingSecret == nil {
 		// No existing secret found, renewal required
+		log.V(1).Info("No existing secret found, renewal required")
 		return true, nil, nil
 	}
 
 	expiresAt, err := getExpirationFromSecret(existingSecret)
 	if err != nil {
-		log.Error(err, "could not parse expiration for existing secret, renewal required")
+		log.Error(err, "could not parse expiration for existing secret, forcing renewal to ensure certificate validity")
 		return true, nil, nil
 	}
 
@@ -383,8 +397,12 @@ func (r *VaultSecretReconciler) getExistingSecret(ctx context.Context, name, nam
 
 // getExpirationFromSecret extracts the expiration time from a PKI secret
 func getExpirationFromSecret(secret *corev1.Secret) (*time.Time, error) {
+	if secret == nil {
+		return nil, fmt.Errorf("secret is nil")
+	}
+
 	// First, try to get expiration field directly (primary method)
-	if expirationData, exists := secret.Data["expiration"]; exists {
+	if expirationData, exists := secret.Data["expiration"]; exists && len(expirationData) > 0 {
 		if expirationUnix, err := strconv.ParseInt(string(expirationData), 10, 64); err == nil {
 			expirationTime := time.Unix(expirationUnix, 0)
 			return &expirationTime, nil
@@ -394,7 +412,7 @@ func getExpirationFromSecret(secret *corev1.Secret) (*time.Time, error) {
 	// Fallback: parse X.509 certificate for expiration
 	certData := getCertificateData(secret)
 	if certData == nil {
-		return nil, fmt.Errorf("no expiration field or certificate data found in secret")
+		return nil, fmt.Errorf("no expiration field or certificate data found in secret (available keys: %v)", getSecretDataKeys(secret))
 	}
 
 	expirationTime, err := parseCertificateExpiration(certData)
@@ -403,6 +421,18 @@ func getExpirationFromSecret(secret *corev1.Secret) (*time.Time, error) {
 	}
 
 	return expirationTime, nil
+}
+
+// getSecretDataKeys returns the list of keys in a secret for debugging purposes
+func getSecretDataKeys(secret *corev1.Secret) []string {
+	if secret == nil || secret.Data == nil {
+		return []string{}
+	}
+	keys := make([]string, 0, len(secret.Data))
+	for k := range secret.Data {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // getCertificateData extracts certificate data from a secret

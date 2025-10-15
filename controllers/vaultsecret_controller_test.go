@@ -315,6 +315,34 @@ func TestGetExpirationFromSecret(t *testing.T) {
 			expectError: true,
 			description: "Should fail with invalid certificate data",
 		},
+		{
+			name: "Wildcard certificate without expiration field",
+			secret: func() *corev1.Secret {
+				cert := createTestCertificateWithCN(time.Now().Add(30*24*time.Hour), "*.example.com")
+				return &corev1.Secret{
+					Data: map[string][]byte{
+						"certificate": cert,
+						// No expiration field - simulating wildcard cert behavior
+					},
+				}
+			}(),
+			expectError: false,
+			description: "Should parse expiration from wildcard certificate without expiration field",
+		},
+		{
+			name: "Wildcard certificate in tls.crt",
+			secret: func() *corev1.Secret {
+				cert := createTestCertificateWithCN(time.Now().Add(60*24*time.Hour), "*.my.domain")
+				return &corev1.Secret{
+					Data: map[string][]byte{
+						"tls.crt": cert,
+						// No expiration field
+					},
+				}
+			}(),
+			expectError: false,
+			description: "Should parse expiration from wildcard certificate in tls.crt field",
+		},
 	}
 
 	for _, tt := range tests {
@@ -467,11 +495,15 @@ func createSecretWithExpiration(expiresAt time.Time) *corev1.Secret {
 }
 
 func createTestCertificate(expiresAt time.Time) []byte {
+	return createTestCertificateWithCN(expiresAt, "test-certificate")
+}
+
+func createTestCertificateWithCN(expiresAt time.Time, commonName string) []byte {
 	// Create a simple test certificate
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			CommonName: "test-certificate",
+			CommonName: commonName,
 		},
 		NotBefore:   time.Now(),
 		NotAfter:    expiresAt,
