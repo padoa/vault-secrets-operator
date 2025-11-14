@@ -145,13 +145,38 @@ func convertData(secretData map[string]interface{}, keys []string, isBinary bool
 			continue
 		}
 		if len(keys) == 0 || contains(key, keys) {
-			switch value.(type) {
+			switch v := value.(type) {
 			case map[string]interface{}:
 				jsonString, err := json.Marshal(value)
 				if err != nil {
 					return nil, err
 				}
 				data[key] = []byte(jsonString)
+			case []interface{}:
+				// Handle arrays (e.g., ca_chain from PKI engine)
+				// Check if all items are strings
+				allStrings := true
+				var strSlice []string
+				for _, item := range v {
+					if str, ok := item.(string); ok {
+						strSlice = append(strSlice, str)
+					} else {
+						allStrings = false
+						break
+					}
+				}
+				
+				if allStrings {
+					// Join strings with newlines (useful for certificate chains)
+					data[key] = []byte(strings.Join(strSlice, "\n"))
+				} else {
+					// If array contains non-strings, marshal as JSON
+					jsonString, err := json.Marshal(value)
+					if err != nil {
+						return nil, err
+					}
+					data[key] = []byte(jsonString)
+				}
 			case string:
 				if isBinary {
 					data[key], err = b64.StdEncoding.DecodeString(value.(string))
