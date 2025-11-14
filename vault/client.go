@@ -165,7 +165,7 @@ func convertData(secretData map[string]interface{}, keys []string, isBinary bool
 						break
 					}
 				}
-				
+
 				if allStrings {
 					// Join strings with newlines (useful for certificate chains)
 					data[key] = []byte(strings.Join(strSlice, "\n"))
