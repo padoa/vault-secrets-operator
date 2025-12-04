@@ -42,7 +42,11 @@ const (
 	conditionInvalidResource    = "InvalidResource"
 
 	// Annotation key for storing VaultSecret spec hash
-	annotationSpecHash = "vault-secrets-operator.ricoberger.de/vaultsecret-spec-hash"
+	annotationSpecHash      = "vault-secrets-operator.ricoberger.de/vaultsecret-spec-hash"
+	annotationLeaseID       = "vault-secrets-operator.ricoberger.de/lease-id"
+	annotationLeaseDuration = "vault-secrets-operator.ricoberger.de/lease-duration"
+	annotationRenewable     = "vault-secrets-operator.ricoberger.de/renewable"
+	annotationExpiration    = "vault-secrets-operator.ricoberger.de/expiration"
 )
 
 // VaultSecretReconciler reconciles a VaultSecret object
@@ -96,7 +100,12 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// When the property isn't set we are using the shared client. It is also possible that the shared client is nil, so
 	// that we have to check for this first. This could happen since we do not return an error when we initializing the
 	// client during start up, to not require a default Vault Role.
+
+	// Data is the data to be added to the Kubernetes secret
 	var data map[string][]byte
+
+	// ExtraAnnotations are the extra annotations to be added to the Kubernetes secret
+	var extraAnnotations map[string]string
 
 	var vaultClient *vault.Client
 
@@ -206,41 +215,28 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		log.Info(fmt.Sprintf("PKI Secret %s created, will expire on %s", instance.Name, expiresAt.String()))
-
 		// Do not set requeue now, will be set the next time we check the secret
 
 		// Database secret
 	} else if instance.Spec.SecretEngine == ricobergerdev1alpha1.DatabaseEngine {
-		if err := ValidateDatabase(instance); err != nil {
-			log.Error(err, "Resource validation failed")
-			r.updateConditions(ctx, instance, conditionInvalidResource, err.Error(), metav1.ConditionFalse)
-			return ctrl.Result{}, err
-		}
-
-		var secret *api.Secret
-		secret, expiresAt, err := vaultClient.GetDatabaseCreds(instance.Spec.Path, instance.Spec.Role)
+		var dbReconcileResult ctrl.Result
+		data, extraAnnotations, dbReconcileResult, err = r.handleDatabaseSecret(ctx, instance, vaultClient)
 		if err != nil {
-			log.Error(err, "Could not get database credentials from vault")
-			r.updateConditions(ctx, instance, conditionReasonFetchFailed, err.Error(), metav1.ConditionFalse)
 			return ctrl.Result{}, err
 		}
-
-		data, err = vaultClient.DatabaseRenderData(secret)
-		if err != nil {
-			log.Error(err, "Could not render database data")
-			r.updateConditions(ctx, instance, conditionReasonCreateFailed, err.Error(), metav1.ConditionFalse)
-			return ctrl.Result{}, err
+		// If renewal is not needed, return early with requeue time
+		if data == nil {
+			return dbReconcileResult, nil
 		}
-
-		if expiresAt != nil {
-			reconcileResult.RequeueAfter = time.Until(*expiresAt)
-			log.Info(fmt.Sprintf("Secret %s will expire on %s", instance.Name, expiresAt.String()))
-			log.Info(fmt.Sprintf("Secret %s will be renewed on %s", instance.Name, time.Now().Add(reconcileResult.RequeueAfter).String()))
+		// Merge reconcile result if needed
+		if dbReconcileResult.RequeueAfter > 0 {
+			reconcileResult.RequeueAfter = dbReconcileResult.RequeueAfter
 		}
 	}
 
 	// Define a new Secret object
-	secret, err := newSecretForCR(instance, data)
+	log.Info(fmt.Sprintf("Generating Kubernetes secret for %s with data: %+v", instance.Name, data))
+	secret, err := newSecretForCR(instance, data, extraAnnotations)
 	if err != nil {
 		// Error while creating the Kubernetes secret - requeue the request.
 		log.Error(err, "Could not create Kubernetes secret")
@@ -322,7 +318,10 @@ func (r *VaultSecretReconciler) updateConditions(ctx context.Context, instance *
 	}
 }
 
-func computeRenewalDate(expiresAt *time.Time, certificateDuration time.Duration, renewalThreshold float64, renewalJitter float64) *time.Time {
+// computeRenewalDate calculates when a secret should be renewed based on expiration time,
+// duration, renewal threshold, and jitter. Works for both PKI certificates and database credentials.
+// jitter ranges from -renewalJitter to +renewalJitter to add randomness and prevent renewal storms.
+func computeRenewalDate(expiresAt *time.Time, duration time.Duration, renewalThreshold float64, renewalJitter float64) *time.Time {
 	// Generate final renewal lifetime percentage with jitter
 	// jitter ranges from -renewalJitter to +renewalJitter
 	jitter := 0.0
@@ -336,7 +335,7 @@ func computeRenewalDate(expiresAt *time.Time, certificateDuration time.Duration,
 		panic(fmt.Sprintf("finalRenewalPercentage is out of bounds: %f", finalRenewalPercentage))
 	}
 
-	maxRemainingTimeBeforeRenewal := time.Duration(float64(certificateDuration) * finalRenewalPercentage)
+	maxRemainingTimeBeforeRenewal := time.Duration(float64(duration) * finalRenewalPercentage)
 	renewalDate := expiresAt.Add(-maxRemainingTimeBeforeRenewal)
 
 	return &renewalDate
@@ -364,6 +363,169 @@ func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret,
 	needsRenewal = now.After(*renewalDate)
 
 	return needsRenewal, renewalDate, expiresAt
+}
+
+// needsDatabaseRenewal determines if a Database credentials needs renewal
+// in case of an error, we return true to always renew the database credentials just to be safe
+func needsDatabaseRenewal(expiresAt *time.Time, databaseDuration time.Duration, renewalThreshold float64, renewalJitter float64) (needsRenewal bool, renewalDate *time.Time) {
+	renewalDate = computeRenewalDate(expiresAt, databaseDuration, renewalThreshold, renewalJitter)
+
+	// Check if current date is after this threshold
+	now := time.Now()
+	needsRenewal = now.After(*renewalDate)
+
+	return needsRenewal, renewalDate
+}
+
+// parseDatabaseAnnotations extracts and parses database secret annotations
+func parseDatabaseAnnotations(existingSecret *corev1.Secret) (duration time.Duration, expiresAt time.Time, err error) {
+	durationStr, durationExists := existingSecret.Annotations[annotationLeaseDuration]
+	if !durationExists {
+		return 0, time.Time{}, fmt.Errorf("lease duration annotation not found")
+	}
+
+	durationInt, err := strconv.Atoi(durationStr)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("could not parse lease duration: %w", err)
+	}
+	if durationInt <= 0 {
+		return 0, time.Time{}, fmt.Errorf("lease duration must be positive, got: %d", durationInt)
+	}
+	duration = time.Duration(durationInt) * time.Second
+
+	expirationStr, expirationExists := existingSecret.Annotations[annotationExpiration]
+	if !expirationExists {
+		return 0, time.Time{}, fmt.Errorf("expiration time annotation not found")
+	}
+
+	expiresAt, err = time.Parse(time.RFC3339, expirationStr)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("could not parse expiration time: %w", err)
+	}
+
+	return duration, expiresAt, nil
+}
+
+// checkDatabaseSecretRenewal determines if a database secret needs renewal
+// Returns (needsRenewal, renewalDate, expiresAt, error)
+// If renewal is not needed, renewalDate will be set for requeue scheduling
+func checkDatabaseSecretRenewal(ctx context.Context, instance *ricobergerdev1alpha1.VaultSecret, existingSecret *corev1.Secret, vaultClient *vault.Client) (needsRenewal bool, renewalDate *time.Time, expiresAt *time.Time, err error) {
+	log := logr.FromContext(ctx)
+
+	if existingSecret == nil {
+		// No existing secret found, renewal required
+		return true, nil, nil, nil
+	}
+
+	// Check if spec has changed by comparing hashes
+	currentSpecHash := instance.Spec.Hash()
+	storedHash, hashExists := existingSecret.Annotations[annotationSpecHash]
+	_, expirationExists := existingSecret.Annotations[annotationExpiration]
+	_, durationExists := existingSecret.Annotations[annotationLeaseDuration]
+
+	if !expirationExists {
+		log.Info(fmt.Sprintf("Expiration time annotation not found in Kubernetes secret %s, renewal required", instance.Name))
+		return true, nil, nil, nil
+	}
+
+	if !durationExists {
+		log.Info(fmt.Sprintf("Lease duration annotation not found in Kubernetes secret %s, renewal required", instance.Name))
+		return true, nil, nil, nil
+	}
+
+	if !hashExists {
+		log.Info(fmt.Sprintf("Spec hash annotation not found in Kubernetes secret %s, renewal required", instance.Name))
+		return true, nil, nil, nil
+	}
+
+	if storedHash != currentSpecHash {
+		log.Info(fmt.Sprintf("Spec changed for Database secret %s, regenerating creds", instance.Name))
+		return true, nil, nil, nil
+	}
+
+	// Parse annotations
+	databaseDuration, expiresAtParsed, err := parseDatabaseAnnotations(existingSecret)
+	if err != nil {
+		return true, nil, nil, err
+	}
+
+	expiresAt = &expiresAtParsed
+
+	// Check if renewal is needed based on threshold and jitter
+	renewalThreshold := vaultClient.GetDatabaseRenewalThreshold()
+	renewalJitter := vaultClient.GetDatabaseRenewalJitter()
+	needsRenewal, renewalDate = needsDatabaseRenewal(expiresAt, databaseDuration, renewalThreshold, renewalJitter)
+
+	return needsRenewal, renewalDate, expiresAt, nil
+}
+
+// handleDatabaseSecret processes database secret creation/renewal
+// Returns (data, extraAnnotations, reconcileResult, error)
+func (r *VaultSecretReconciler) handleDatabaseSecret(ctx context.Context, instance *ricobergerdev1alpha1.VaultSecret, vaultClient *vault.Client) (map[string][]byte, map[string]string, ctrl.Result, error) {
+	log := logr.FromContext(ctx)
+	reconcileResult := ctrl.Result{}
+
+	// Validate database resource
+	if err := ValidateDatabase(instance); err != nil {
+		log.Error(err, "Resource validation failed")
+		r.updateConditions(ctx, instance, conditionInvalidResource, err.Error(), metav1.ConditionFalse)
+		return nil, nil, ctrl.Result{}, err
+	}
+
+	// Get existing secret in Kubernetes to check hash
+	existingSecret, err := r.getExistingSecret(ctx, instance.Name, instance.Namespace)
+	if err != nil {
+		log.Error(err, "Error checking for existing secret")
+		r.updateConditions(ctx, instance, conditionReasonFetchFailed, err.Error(), metav1.ConditionFalse)
+		return nil, nil, ctrl.Result{}, err
+	}
+
+	// Check if existing secret exists and if it needs renewal
+	if existingSecret != nil {
+		needsRenewal, renewalDate, expiresAt, err := checkDatabaseSecretRenewal(ctx, instance, existingSecret, vaultClient)
+		if err != nil {
+			log.Error(err, "Error checking database secret renewal")
+			r.updateConditions(ctx, instance, conditionReasonFetchFailed, err.Error(), metav1.ConditionFalse)
+			return nil, nil, ctrl.Result{}, err
+		}
+
+		if !needsRenewal {
+			log.Info(fmt.Sprintf("No renewal required for Database secret %s, will expire on %s, will renew around %s", instance.Name, expiresAt.String(), renewalDate.String()))
+			reconcileResult.RequeueAfter = time.Until(*renewalDate)
+			return nil, nil, reconcileResult, nil
+		}
+
+		log.Info(fmt.Sprintf("Renewal required for Database secret %s, will expire on %s", instance.Name, expiresAt.String()))
+	}
+
+	// Generate new database credentials
+	log.Info(fmt.Sprintf("Generating new database credentials for %s", instance.Name))
+
+	// Generate dynamic database credentials from Vault
+	creds, err := vaultClient.GetDatabaseCreds(instance.Spec.Path, instance.Spec.Role)
+	if err != nil {
+		log.Error(err, "Could not get database credentials from vault")
+		r.updateConditions(ctx, instance, conditionReasonFetchFailed, err.Error(), metav1.ConditionFalse)
+		return nil, nil, ctrl.Result{}, err
+	}
+
+	// Render database credentials into data map for Kubernetes secret
+	data, err := vaultClient.DatabaseRenderData(creds)
+	if err != nil {
+		log.Error(err, "Could not render database data")
+		r.updateConditions(ctx, instance, conditionReasonCreateFailed, err.Error(), metav1.ConditionFalse)
+		return nil, nil, ctrl.Result{}, err
+	}
+
+	// Add lease metadata to extra annotations
+	extraAnnotations := map[string]string{
+		annotationLeaseID:       creds.LeaseID,
+		annotationLeaseDuration: strconv.Itoa(creds.LeaseDuration),
+		annotationRenewable:     strconv.FormatBool(creds.Renewable),
+		annotationExpiration:    time.Now().Add(time.Duration(creds.LeaseDuration) * time.Second).Format(time.RFC3339),
+	}
+
+	return data, extraAnnotations, reconcileResult, nil
 }
 
 // getExistingSecret retrieves an existing Kubernetes secret, returning nil if not found
@@ -519,22 +681,27 @@ func runTemplate(cr *ricobergerdev1alpha1.VaultSecret, tmpl string, secrets map[
 
 // newSecretForCR returns a secret with the same name/namespace as the CR. The secret will include all labels and
 // annotations from the CR.
-func newSecretForCR(cr *ricobergerdev1alpha1.VaultSecret, data map[string][]byte) (*corev1.Secret, error) {
+func newSecretForCR(cr *ricobergerdev1alpha1.VaultSecret, data map[string][]byte, extraAnnotations map[string]string) (*corev1.Secret, error) {
+	// Copy labels
 	labels := map[string]string{}
 	for k, v := range cr.ObjectMeta.Labels {
 		labels[k] = v
 	}
 
+	// Copy annotations
 	annotations := map[string]string{}
 	for k, v := range cr.ObjectMeta.Annotations {
 		annotations[k] = v
 	}
 
-	// Add spec hash annotation for PKI secrets
-	if cr.Spec.SecretEngine == ricobergerdev1alpha1.PKIEngine {
+	// Add spec hash for PKI & Database engines
+	if cr.Spec.SecretEngine == ricobergerdev1alpha1.PKIEngine ||
+		cr.Spec.SecretEngine == ricobergerdev1alpha1.DatabaseEngine {
+
 		annotations[annotationSpecHash] = cr.Spec.Hash()
 	}
 
+	// Apply templating if needed
 	if cr.Spec.Templates != nil {
 		newdata := make(map[string][]byte)
 		for k, v := range cr.Spec.Templates {
@@ -547,6 +714,14 @@ func newSecretForCR(cr *ricobergerdev1alpha1.VaultSecret, data map[string][]byte
 		data = newdata
 	}
 
+	// Add extra annotations ONLY if not empty
+	if len(extraAnnotations) > 0 {
+		for k, v := range extraAnnotations {
+			annotations[k] = v
+		}
+	}
+
+	// Build the Secret
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        cr.Name,

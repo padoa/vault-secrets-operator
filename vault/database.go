@@ -2,11 +2,11 @@ package vault
 
 import (
 	"fmt"
-	"github.com/hashicorp/vault/api"
 	"net"
 	"net/url"
 	"regexp"
-	"time"
+
+	"github.com/hashicorp/vault/api"
 )
 
 func (c *Client) getDatabaseUrl(path string, dbName string) (string, error) {
@@ -46,43 +46,49 @@ func extractHostPort(connectionUrl string) (string, string, error) {
 
 // GetDatabaseCreds returns username/password/host/port for a Vault Database role
 // Host and port are extracted from the configuration of the database
-// Username and Password are generated using the creds endpoint
-func (c *Client) GetDatabaseCreds(path string, role string) (*api.Secret, *time.Time, error) {
+// Username, Password are generated using the creds endpoint
+func (c *Client) GetDatabaseCreds(path string, role string) (*api.Secret, error) {
+	// Request database credentials
 	secret, err := c.client.Logical().ReadWithData(path+"/creds/"+role, map[string][]string{})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if secret == nil {
-		return nil, nil, fmt.Errorf("database credentials is nil")
+		log.Info("Secret is nil or empty")
+		return nil, fmt.Errorf("database credentials is nil")
 	}
 
-	secret.LeaseDuration = 2600000
-	expiresAt := time.Now().Add(time.Duration(secret.LeaseDuration) * time.Second)
-
+	// Read role config for connection URL
 	roleSecret, err := c.client.Logical().ReadWithData(path+"/roles/"+role, map[string][]string{})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	dbName, ok := roleSecret.Data["db_name"].(string)
 	if !ok {
-		return nil, nil, fmt.Errorf("cannot cast db_name to string for role %s", role)
+		return nil, fmt.Errorf("cannot cast db_name to string for role %s", role)
 	}
 
 	connectionUrl, _ := c.getDatabaseUrl(path, dbName)
 
 	host, port, err := extractHostPort(connectionUrl)
 	if err != nil {
-		return nil, nil, fmt.Errorf("cannot extract host and port from connection url %s", connectionUrl)
+		return nil, fmt.Errorf("cannot extract host and port from connection url %s", connectionUrl)
 	}
 
+	// Add host and port to the secret data
 	secret.Data["host"] = host
 	secret.Data["port"] = port
 
-	return secret, &expiresAt, nil
+	return secret, nil
 }
 
 func (c *Client) DatabaseRenderData(secret *api.Secret) (map[string][]byte, error) {
-	return convertData(secret.Data, []string{"host", "port", "username", "password"}, false)
+	dataMap, err := convertData(secret.Data, []string{"host", "port", "username", "password"}, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return dataMap, nil
 }
