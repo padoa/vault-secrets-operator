@@ -217,7 +217,7 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.Info(fmt.Sprintf("PKI Secret %s created, will expire on %s", instance.Name, expiresAt.String()))
 		// Do not set requeue now, will be set the next time we check the secret
 
-		// Database secret
+	// Database secret
 	} else if instance.Spec.SecretEngine == ricobergerdev1alpha1.DatabaseEngine {
 		var dbReconcileResult ctrl.Result
 		data, extraAnnotations, dbReconcileResult, err = r.handleDatabaseSecret(ctx, instance, vaultClient)
@@ -341,6 +341,18 @@ func computeRenewalDate(expiresAt *time.Time, duration time.Duration, renewalThr
 	return &renewalDate
 }
 
+// checkNeedsRenewal is the core function that determines if a secret needs renewal based on expiration time,
+// duration, renewal threshold, and jitter. Works for both PKI certificates and database credentials.
+func checkNeedsRenewal(expiresAt *time.Time, duration time.Duration, renewalThreshold float64, renewalJitter float64) (bool, *time.Time) {
+	renewalDate := computeRenewalDate(expiresAt, duration, renewalThreshold, renewalJitter)
+
+	// Check if current date is after this threshold
+	now := time.Now()
+	needsRenewal := now.After(*renewalDate)
+
+	return needsRenewal, renewalDate
+}
+
 // needsCertificateRenewal determines if a PKI certificate needs renewal
 // in case of an error, we return true to always renew the certificate just to be safe
 func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret, certificateDuration time.Duration, renewalThreshold float64, renewalJitter float64) (needsRenewal bool, renewalDate, expiresAt *time.Time) {
@@ -356,11 +368,7 @@ func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret,
 		return true, nil, nil
 	}
 
-	renewalDate = computeRenewalDate(expiresAt, certificateDuration, renewalThreshold, renewalJitter)
-
-	// Check if current date is after this threshold
-	now := time.Now()
-	needsRenewal = now.After(*renewalDate)
+	needsRenewal, renewalDate = checkNeedsRenewal(expiresAt, certificateDuration, renewalThreshold, renewalJitter)
 
 	return needsRenewal, renewalDate, expiresAt
 }
@@ -368,13 +376,7 @@ func needsCertificateRenewal(ctx context.Context, existingSecret *corev1.Secret,
 // needsDatabaseRenewal determines if a Database credentials needs renewal
 // in case of an error, we return true to always renew the database credentials just to be safe
 func needsDatabaseRenewal(expiresAt *time.Time, databaseDuration time.Duration, renewalThreshold float64, renewalJitter float64) (needsRenewal bool, renewalDate *time.Time) {
-	renewalDate = computeRenewalDate(expiresAt, databaseDuration, renewalThreshold, renewalJitter)
-
-	// Check if current date is after this threshold
-	now := time.Now()
-	needsRenewal = now.After(*renewalDate)
-
-	return needsRenewal, renewalDate
+	return checkNeedsRenewal(expiresAt, databaseDuration, renewalThreshold, renewalJitter)
 }
 
 // parseDatabaseAnnotations extracts and parses database secret annotations
