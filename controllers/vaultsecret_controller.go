@@ -217,7 +217,7 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.Info(fmt.Sprintf("PKI Secret %s created, will expire on %s", instance.Name, expiresAt.String()))
 		// Do not set requeue now, will be set the next time we check the secret
 
-	// Database secret
+		// Database secret
 	} else if instance.Spec.SecretEngine == ricobergerdev1alpha1.DatabaseEngine {
 		var dbReconcileResult ctrl.Result
 		data, extraAnnotations, dbReconcileResult, err = r.handleDatabaseSecret(ctx, instance, vaultClient)
@@ -235,7 +235,6 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Define a new Secret object
-	log.Info(fmt.Sprintf("Generating Kubernetes secret for %s with data: %+v", instance.Name, data))
 	secret, err := newSecretForCR(instance, data, extraAnnotations)
 	if err != nil {
 		// Error while creating the Kubernetes secret - requeue the request.

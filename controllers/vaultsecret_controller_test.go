@@ -452,6 +452,236 @@ func TestParseCertificateExpiration(t *testing.T) {
 	}
 }
 
+func TestNeedsDatabaseRenewal(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name             string
+		expiresAt        *time.Time
+		databaseDuration time.Duration
+		renewalThreshold float64
+		renewalJitter    float64
+		expectedRenewal  bool
+		description      string
+	}{
+		{
+			name:             "Future expiration - no renewal needed",
+			expiresAt:        func() *time.Time { t := now.Add(20 * time.Hour); return &t }(),
+			databaseDuration: 24 * time.Hour,
+			renewalThreshold: 0.3, // Renew at 30% = when 7.2 hours remain
+			renewalJitter:    0.0,
+			expectedRenewal:  false,
+			description:      "Should not renew when 20 hours remain (>7.2 hour threshold)",
+		},
+		{
+			name:             "Near expiration - renewal needed",
+			expiresAt:        func() *time.Time { t := now.Add(5 * time.Hour); return &t }(),
+			databaseDuration: 24 * time.Hour,
+			renewalThreshold: 0.3, // Renew at 30% = when 7.2 hours remain
+			renewalJitter:    0.0,
+			expectedRenewal:  true,
+			description:      "Should renew when 5 hours remain (<7.2 hour threshold)",
+		},
+		{
+			name:             "Expired - renewal needed",
+			expiresAt:        func() *time.Time { t := now.Add(-1 * time.Hour); return &t }(),
+			databaseDuration: 24 * time.Hour,
+			renewalThreshold: 0.3,
+			renewalJitter:    0.0,
+			expectedRenewal:  true,
+			description:      "Should renew when credentials are expired",
+		},
+		{
+			name:             "High threshold - early renewal",
+			expiresAt:        func() *time.Time { t := now.Add(50 * time.Hour); return &t }(),
+			databaseDuration: 100 * time.Hour,
+			renewalThreshold: 0.8, // Renew at 80% = when 20 hours remain
+			renewalJitter:    0.0,
+			expectedRenewal:  true,
+			description:      "Should renew when 50 hours remain (<80 hour threshold)",
+		},
+		{
+			name:             "Far future expiration - no renewal needed",
+			expiresAt:        func() *time.Time { t := now.Add(100 * time.Hour); return &t }(),
+			databaseDuration: 100 * time.Hour,
+			renewalThreshold: 0.3, // Renew at 30% = when 30 hours remain
+			renewalJitter:    0.0,
+			expectedRenewal:  false,
+			description:      "Should not renew when 100 hours remain (>30 hour threshold)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			needsRenewal, renewalDate := needsDatabaseRenewal(tt.expiresAt, tt.databaseDuration, tt.renewalThreshold, tt.renewalJitter)
+
+			if needsRenewal != tt.expectedRenewal {
+				t.Errorf("Expected needsRenewal=%v, got %v. %s", tt.expectedRenewal, needsRenewal, tt.description)
+			}
+
+			// When renewal is not needed, renewalDate should be set
+			if !needsRenewal && renewalDate == nil {
+				t.Errorf("Expected renewalDate to be set when renewal is not needed")
+			}
+
+			// Verify renewal date is before expiration
+			if renewalDate != nil && renewalDate.After(*tt.expiresAt) {
+				t.Errorf("Renewal date %v should be before expiration %v", renewalDate, tt.expiresAt)
+			}
+		})
+	}
+}
+
+func TestParseDatabaseAnnotations(t *testing.T) {
+	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	expiresAt := baseTime.Add(24 * time.Hour)
+	leaseDuration := 3600 // 1 hour in seconds
+
+	tests := []struct {
+		name        string
+		secret      *corev1.Secret
+		expectError bool
+		expectedDur time.Duration
+		expectedExp time.Time
+		description string
+	}{
+		{
+			name: "Valid annotations",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						annotationLeaseDuration: strconv.Itoa(leaseDuration),
+						annotationExpiration:    expiresAt.Format(time.RFC3339),
+					},
+				},
+			},
+			expectError: false,
+			expectedDur: time.Duration(leaseDuration) * time.Second,
+			expectedExp: expiresAt,
+			description: "Should parse valid lease duration and expiration",
+		},
+		{
+			name: "Missing lease duration annotation",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						annotationExpiration: expiresAt.Format(time.RFC3339),
+					},
+				},
+			},
+			expectError: true,
+			description: "Should fail when lease duration annotation is missing",
+		},
+		{
+			name: "Missing expiration annotation",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						annotationLeaseDuration: strconv.Itoa(leaseDuration),
+					},
+				},
+			},
+			expectError: true,
+			description: "Should fail when expiration annotation is missing",
+		},
+		{
+			name: "Invalid lease duration format",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						annotationLeaseDuration: "not-a-number",
+						annotationExpiration:    expiresAt.Format(time.RFC3339),
+					},
+				},
+			},
+			expectError: true,
+			description: "Should fail with invalid lease duration format",
+		},
+		{
+			name: "Invalid expiration format",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						annotationLeaseDuration: strconv.Itoa(leaseDuration),
+						annotationExpiration:    "not-a-timestamp",
+					},
+				},
+			},
+			expectError: true,
+			description: "Should fail with invalid expiration format",
+		},
+		{
+			name: "Zero lease duration",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						annotationLeaseDuration: "0",
+						annotationExpiration:    expiresAt.Format(time.RFC3339),
+					},
+				},
+			},
+			expectError: true,
+			description: "Should fail with zero lease duration",
+		},
+		{
+			name: "Negative lease duration",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						annotationLeaseDuration: "-100",
+						annotationExpiration:    expiresAt.Format(time.RFC3339),
+					},
+				},
+			},
+			expectError: true,
+			description: "Should fail with negative lease duration",
+		},
+		{
+			name: "Large lease duration",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						annotationLeaseDuration: "2592000", // 30 days
+						annotationExpiration:    expiresAt.Format(time.RFC3339),
+					},
+				},
+			},
+			expectError: false,
+			expectedDur: 30 * 24 * time.Hour,
+			expectedExp: expiresAt,
+			description: "Should handle large lease durations",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			duration, expiration, err := parseDatabaseAnnotations(tt.secret)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but none occurred. %s", tt.description)
+				}
+				if duration != 0 {
+					t.Errorf("Expected zero duration when error occurs, got %v", duration)
+				}
+				if !expiration.IsZero() {
+					t.Errorf("Expected zero expiration time when error occurs")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v. %s", err, tt.description)
+				}
+				if duration != tt.expectedDur {
+					t.Errorf("Expected duration %v, got %v. %s", tt.expectedDur, duration, tt.description)
+				}
+				if !expiration.Equal(tt.expectedExp) {
+					t.Errorf("Expected expiration %v, got %v. %s", tt.expectedExp, expiration, tt.description)
+				}
+			}
+		})
+	}
+}
+
 // Helper functions
 
 func createSecretWithExpiration(expiresAt time.Time) *corev1.Secret {
