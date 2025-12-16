@@ -43,9 +43,7 @@ const (
 
 	// Annotation key for storing VaultSecret spec hash
 	annotationSpecHash      = "vault-secrets-operator.ricoberger.de/vaultsecret-spec-hash"
-	annotationLeaseID       = "vault-secrets-operator.ricoberger.de/lease-id"
 	annotationLeaseDuration = "vault-secrets-operator.ricoberger.de/lease-duration"
-	annotationRenewable     = "vault-secrets-operator.ricoberger.de/renewable"
 	annotationExpiration    = "vault-secrets-operator.ricoberger.de/expiration"
 )
 
@@ -520,9 +518,7 @@ func (r *VaultSecretReconciler) handleDatabaseSecret(ctx context.Context, instan
 
 	// Add lease metadata to extra annotations
 	extraAnnotations := map[string]string{
-		annotationLeaseID:       creds.LeaseID,
 		annotationLeaseDuration: strconv.Itoa(creds.LeaseDuration),
-		annotationRenewable:     strconv.FormatBool(creds.Renewable),
 		annotationExpiration:    time.Now().Add(time.Duration(creds.LeaseDuration) * time.Second).Format(time.RFC3339),
 	}
 
