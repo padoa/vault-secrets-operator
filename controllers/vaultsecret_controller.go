@@ -486,12 +486,20 @@ func (r *VaultSecretReconciler) handleDatabaseSecret(ctx context.Context, instan
 		}
 
 		if !needsRenewal {
-			log.Info(fmt.Sprintf("No renewal required for Database secret %s, will expire on %s, will renew around %s", instance.Name, expiresAt.String(), renewalDate.String()))
-			reconcileResult.RequeueAfter = time.Until(*renewalDate)
-			return nil, nil, reconcileResult, nil
+			if expiresAt != nil && renewalDate != nil {
+				log.Info(fmt.Sprintf("No renewal required for Database secret %s, will expire on %s, will renew around %s", instance.Name, expiresAt.String(), renewalDate.String()))
+				reconcileResult.RequeueAfter = time.Until(*renewalDate)
+				return nil, nil, reconcileResult, nil
+			}
+			// This should not happen if needsRenewal is false, but be defensive
+			log.Info(fmt.Sprintf("No renewal required for Database secret %s, but expiration/renewal date unavailable, forcing renewal", instance.Name))
 		}
 
-		log.Info(fmt.Sprintf("Renewal required for Database secret %s, will expire on %s", instance.Name, expiresAt.String()))
+		if expiresAt != nil && renewalDate != nil {
+			log.Info(fmt.Sprintf("Renewal required for Database secret %s, will expire on %s, will renew around %s", instance.Name, expiresAt.String(), renewalDate.String()))
+		} else {
+			log.Info(fmt.Sprintf("Renewal required for Database secret %s (but expiration/renewal date unavailable, forcing renewal)", instance.Name))
+		}
 	}
 
 	// Generate new database credentials
