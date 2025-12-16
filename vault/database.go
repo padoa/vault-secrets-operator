@@ -85,10 +85,5 @@ func (c *Client) GetDatabaseCreds(path string, role string) (*api.Secret, error)
 }
 
 func (c *Client) DatabaseRenderData(secret *api.Secret) (map[string][]byte, error) {
-	dataMap, err := convertData(secret.Data, []string{"host", "port", "username", "password"}, false)
-	if err != nil {
-		return nil, err
-	}
-
-	return dataMap, nil
+	return convertData(secret.Data, []string{"host", "port", "username", "password"}, false)
 }
