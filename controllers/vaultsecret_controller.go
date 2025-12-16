@@ -223,12 +223,9 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		// If renewal is not needed, return early with requeue time
-		if data == nil {
-			return dbReconcileResult, nil
-		}
-		// Merge reconcile result if needed
 		if dbReconcileResult.RequeueAfter > 0 {
 			reconcileResult.RequeueAfter = dbReconcileResult.RequeueAfter
+			return reconcileResult, nil
 		}
 	}
 
