@@ -267,6 +267,12 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Secret already exists, update the secret
+	// Note: KV secrets don't have expiration, so no renewal logic is needed
+	// The secret is updated on each reconciliation to ensure it's in sync with Vault
+	if instance.Spec.SecretEngine == "" || instance.Spec.SecretEngine == ricobergerdev1alpha1.KVEngine {
+		log.Info(fmt.Sprintf("Updating KV Secret %s (KV secrets are updated on each reconciliation, no renewal needed)", instance.Name), "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
+	}
+
 	// Merge -> Checks the existing data keys and merge them into the updated secret
 	// Replace -> Do not check the data keys and replace the secret
 	if instance.Spec.ReconcileStrategy == "Merge" {
