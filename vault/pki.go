@@ -3,8 +3,9 @@ package vault
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/hashicorp/vault/api"
 	"time"
+
+	"github.com/hashicorp/vault/api"
 )
 
 func (c *Client) GetCertificate(path string, role string, options map[string]string) (*api.Secret, *time.Time, error) {
@@ -36,6 +37,7 @@ func (c *Client) PKIRenderData(secret *api.Secret) (map[string][]byte, error) {
 		"certificate",
 		"expiration",
 		"issuing_ca",
+		"ca_chain",
 		"private_key",
 		"private_key_type",
 		"serial_number"}, false)

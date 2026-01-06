@@ -563,6 +563,7 @@ data:
   certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tLi4u
   expiration: MTY0OTc2OTIwMg==
   issuing_ca: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tLi4u
+  ca_chain: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tLi4u
   private_key: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLS4uLg==
   private_key_type: cnNh
   serial_number: MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA6MDA=
@@ -586,6 +587,7 @@ spec:
     tls.crt: "{% .Secrets.certificate %}"
     tls.key: "{% .Secrets.private_key %}"
     ca.crt: "{% .Secrets.issuing_ca %}"
+    ca-chain.crt: "{% .Secrets.ca_chain %}"
   type: Opaque
 ```
 
@@ -593,6 +595,7 @@ The following fields are available:
 * `certificate`
 * `expiration`
 * `issuing_ca`
+* `ca_chain`
 * `private_key`
 * `private_key_type`
 * `serial_number`

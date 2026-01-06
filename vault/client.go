@@ -45,6 +45,10 @@ type Client struct {
 	defaultPKITTL       time.Duration // Default TTL for PKI certificates, depends on Engine configuration
 	pkiRenewalThreshold float64       // Certificate renewal threshold (0-1)
 	pkiRenewalJitter    float64       // Renewal jitter percentage (0-1), added +- to the renewal threshold
+
+	// Database configuration constants
+	databaseRenewalThreshold float64 // Database credentials renewal threshold (0-1)
+	databaseRenewalJitter    float64 // Database credentials renewal jitter percentage (0-1), added +- to the renewal threshold
 }
 
 // PerformRenewToken returns whether the operator should renew its token
@@ -145,13 +149,38 @@ func convertData(secretData map[string]interface{}, keys []string, isBinary bool
 			continue
 		}
 		if len(keys) == 0 || contains(key, keys) {
-			switch value.(type) {
+			switch v := value.(type) {
 			case map[string]interface{}:
 				jsonString, err := json.Marshal(value)
 				if err != nil {
 					return nil, err
 				}
 				data[key] = []byte(jsonString)
+			case []interface{}:
+				// Handle arrays (e.g., ca_chain from PKI engine)
+				// Check if all items are strings
+				allStrings := true
+				var strSlice []string
+				for _, item := range v {
+					if str, ok := item.(string); ok {
+						strSlice = append(strSlice, str)
+					} else {
+						allStrings = false
+						break
+					}
+				}
+
+				if allStrings {
+					// Join strings with newlines (useful for certificate chains)
+					data[key] = []byte(strings.Join(strSlice, "\n"))
+				} else {
+					// If array contains non-strings, marshal as JSON
+					jsonString, err := json.Marshal(value)
+					if err != nil {
+						return nil, err
+					}
+					data[key] = []byte(jsonString)
+				}
 			case string:
 				if isBinary {
 					data[key], err = b64.StdEncoding.DecodeString(value.(string))
@@ -272,4 +301,14 @@ func (c *Client) GetPKIRenewalThreshold() float64 {
 // GetPKIRenewalJitter returns the PKI certificate renewal jitter percentage
 func (c *Client) GetPKIRenewalJitter() float64 {
 	return c.pkiRenewalJitter
+}
+
+// GetDatabaseRenewalThreshold returns the Database credentials renewal threshold
+func (c *Client) GetDatabaseRenewalThreshold() float64 {
+	return c.databaseRenewalThreshold
+}
+
+// GetDatabaseRenewalJitter returns the Database credentials renewal jitter percentage
+func (c *Client) GetDatabaseRenewalJitter() float64 {
+	return c.databaseRenewalJitter
 }
