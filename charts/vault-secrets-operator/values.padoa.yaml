@@ -1,5 +1,10 @@
 replicaCount: 2
 
+# Padoa cost-allocation labels applied to the operator pods.
+podLabels:
+  costs.padoa.fr/client: undefined
+  costs.padoa.fr/component: infra.vault-secrets-operator
+
 # override this on some envs
 resources:
   limits:
