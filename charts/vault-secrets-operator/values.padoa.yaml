@@ -31,15 +31,7 @@ image:
 serviceMonitor:
   enabled: true
 
-# TODO: challenge these settings
 affinity:
-  nodeAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 99
-        preference:
-          matchExpressions:
-            - key: CriticalAddonsOnly
-              operator: Exists
   podAntiAffinity:
     requiredDuringSchedulingIgnoredDuringExecution:
       - labelSelector:
@@ -49,7 +41,3 @@ affinity:
               values:
                 - vault-secrets-operator
         topologyKey: "kubernetes.io/hostname"
-tolerations:
-  - key: CriticalAddonsOnly
-    operator: Exists
-    effect: NoSchedule
