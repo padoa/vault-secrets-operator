@@ -28,8 +28,11 @@ image:
   tag: master
   pullPolicy: Always
 
+# ServiceMonitor lives in the monitoring chart (monitoring/core) instead of here,
+# so the VSO ArgoCD app has no dependency on the prometheus-operator (monitoring.coreos.com)
+# CRDs and can sync before monitoring. This breaks the ArgoCD CRD sync-ordering cycle.
 serviceMonitor:
-  enabled: true
+  enabled: false
 
 affinity:
   podAntiAffinity:
