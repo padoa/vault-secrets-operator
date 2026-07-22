@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	ricobergerdev1alpha1 "github.com/ricoberger/vault-secrets-operator/api/v1alpha1"
 	"github.com/ricoberger/vault-secrets-operator/controllers"
@@ -39,9 +40,15 @@ func main() {
 	var metricsAddr string
 	var probeAddr string
 	var enableLeaderElection bool
+	var leaderElectionLeaseDuration time.Duration
+	var leaderElectionRenewDeadline time.Duration
+	var leaderElectionRetryPeriod time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
+	flag.DurationVar(&leaderElectionLeaseDuration, "leader-elect-lease-duration", 15*time.Second, "Duration non-leader candidates wait before force-acquiring leadership. Higher values mean slower failover.")
+	flag.DurationVar(&leaderElectionRenewDeadline, "leader-elect-renew-deadline", 10*time.Second, "Duration the acting leader retries refreshing the lease before giving up leadership. Must be shorter than the lease duration.")
+	flag.DurationVar(&leaderElectionRetryPeriod, "leader-elect-retry-period", 2*time.Second, "Interval between lease-renewal attempts. Each successful renewal is one write to the leader-election lease.")
 	opts := zap.Options{
 		Development: false,
 	}
@@ -78,6 +85,9 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "vaultsecretsoperator.ricoberger.de",
+		LeaseDuration:          &leaderElectionLeaseDuration,
+		RenewDeadline:          &leaderElectionRenewDeadline,
+		RetryPeriod:            &leaderElectionRetryPeriod,
 		Namespace:              watchNamespace,
 	}
 
