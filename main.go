@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	ricobergerdev1alpha1 "github.com/ricoberger/vault-secrets-operator/api/v1alpha1"
 	"github.com/ricoberger/vault-secrets-operator/controllers"
@@ -71,6 +72,13 @@ func main() {
 		setupLog.Error(err, "unable to get WatchNamespace, the manager will watch and manage resources in all namespaces")
 	}
 
+	// Leader-election lease timings. The active leader writes the election lease
+	// once per retry-period, so longer values reduce writes at the cost of slower
+	// failover. Defaults match the controller-runtime defaults.
+	leaderElectionLeaseDuration := getLeaderElectionDuration("LEADER_ELECTION_LEASE_DURATION", 15*time.Second)
+	leaderElectionRenewDeadline := getLeaderElectionDuration("LEADER_ELECTION_RENEW_DEADLINE", 10*time.Second)
+	leaderElectionRetryPeriod := getLeaderElectionDuration("LEADER_ELECTION_RETRY_PERIOD", 2*time.Second)
+
 	options := ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
@@ -78,6 +86,9 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "vaultsecretsoperator.ricoberger.de",
+		LeaseDuration:          &leaderElectionLeaseDuration,
+		RenewDeadline:          &leaderElectionRenewDeadline,
+		RetryPeriod:            &leaderElectionRetryPeriod,
 		Namespace:              watchNamespace,
 	}
 
@@ -151,6 +162,22 @@ func getWatchNamespace() (string, error) {
 		return "", fmt.Errorf("%s must be set", watchNamespaceEnvVar)
 	}
 	return ns, nil
+}
+
+// getLeaderElectionDuration returns the leader-election duration configured via
+// the given environment variable, parsed as a Go duration string (e.g. "60s").
+// It falls back to defaultValue when the variable is unset, empty, invalid or
+// not strictly positive.
+func getLeaderElectionDuration(envVar string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(envVar); value != "" {
+		if duration, err := time.ParseDuration(value); err == nil && duration > 0 {
+			setupLog.Info("Using configured leader election duration", "env", envVar, "value", duration)
+			return duration
+		}
+		setupLog.Info("Invalid leader election duration value, using default", "env", envVar, "invalid_value", value)
+	}
+
+	return defaultValue
 }
 
 // getMaxConcurrentReconciles returns the maximum number of concurrent reconciles for the controller
