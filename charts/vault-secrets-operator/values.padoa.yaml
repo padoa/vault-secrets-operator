@@ -1,5 +1,16 @@
 replicaCount: 2
 
+# Leader-election lease timings. Longer than the controller-runtime defaults
+# (15s/10s/2s) to cut writes to the leader-election lease. The leader renews
+# (writes) once per retry-period, so 10s yields ~6 writes/min instead of ~30.
+# Failover to the standby replica takes up to lease-duration (~1 min).
+# NOTE: args is a list, so Helm replaces it wholesale; keep -leader-elect here.
+args:
+  - -leader-elect
+  - -leader-elect-lease-duration=60s
+  - -leader-elect-renew-deadline=40s
+  - -leader-elect-retry-period=10s
+
 # Padoa cost-allocation labels applied to the operator pods.
 podLabels:
   costs.padoa.fr/client: undefined
