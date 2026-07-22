@@ -19,6 +19,16 @@ fullnameOverride: ""
 args:
   - -leader-elect
 
+# Leader-election lease timings, passed to the manager as env vars (Go duration
+# strings). Defaults match controller-runtime. The active leader writes the
+# election lease once per retryPeriod, so larger values reduce API writes at the
+# cost of slower failover (a dead leader is replaced after up to leaseDuration).
+# Constraint: leaseDuration > renewDeadline > 1.2 * retryPeriod.
+leaderElection:
+  leaseDuration: 15s
+  renewDeadline: 10s
+  retryPeriod: 2s
+
 environmentVars:
   []
   # Set environment variables from a secret. This must be done, if you use the

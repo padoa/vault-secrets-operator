@@ -99,6 +99,14 @@ spec:
               value: {{ .Values.vault.gcpRole | quote }}
             - name: MAX_CONCURRENT_RECONCILES
               value: {{ .Values.vault.maxConcurrentReconciles | quote }}
+            {{- with .Values.leaderElection }}
+            - name: LEADER_ELECTION_LEASE_DURATION
+              value: {{ .leaseDuration | quote }}
+            - name: LEADER_ELECTION_RENEW_DEADLINE
+              value: {{ .renewDeadline | quote }}
+            - name: LEADER_ELECTION_RETRY_PERIOD
+              value: {{ .retryPeriod | quote }}
+            {{- end }}
 
             {{- with .Values.environmentVars }}
             {{- toYaml . | nindent 12 }}

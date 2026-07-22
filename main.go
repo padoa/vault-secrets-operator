@@ -40,15 +40,9 @@ func main() {
 	var metricsAddr string
 	var probeAddr string
 	var enableLeaderElection bool
-	var leaderElectionLeaseDuration time.Duration
-	var leaderElectionRenewDeadline time.Duration
-	var leaderElectionRetryPeriod time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
-	flag.DurationVar(&leaderElectionLeaseDuration, "leader-elect-lease-duration", 15*time.Second, "Duration non-leader candidates wait before force-acquiring leadership. Higher values mean slower failover.")
-	flag.DurationVar(&leaderElectionRenewDeadline, "leader-elect-renew-deadline", 10*time.Second, "Duration the acting leader retries refreshing the lease before giving up leadership. Must be shorter than the lease duration.")
-	flag.DurationVar(&leaderElectionRetryPeriod, "leader-elect-retry-period", 2*time.Second, "Interval between lease-renewal attempts. Each successful renewal is one write to the leader-election lease.")
 	opts := zap.Options{
 		Development: false,
 	}
@@ -77,6 +71,13 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "unable to get WatchNamespace, the manager will watch and manage resources in all namespaces")
 	}
+
+	// Leader-election lease timings. The active leader writes the election lease
+	// once per retry-period, so longer values reduce writes at the cost of slower
+	// failover. Defaults match the controller-runtime defaults.
+	leaderElectionLeaseDuration := getLeaderElectionDuration("LEADER_ELECTION_LEASE_DURATION", 15*time.Second)
+	leaderElectionRenewDeadline := getLeaderElectionDuration("LEADER_ELECTION_RENEW_DEADLINE", 10*time.Second)
+	leaderElectionRetryPeriod := getLeaderElectionDuration("LEADER_ELECTION_RETRY_PERIOD", 2*time.Second)
 
 	options := ctrl.Options{
 		Scheme:                 scheme,
@@ -161,6 +162,22 @@ func getWatchNamespace() (string, error) {
 		return "", fmt.Errorf("%s must be set", watchNamespaceEnvVar)
 	}
 	return ns, nil
+}
+
+// getLeaderElectionDuration returns the leader-election duration configured via
+// the given environment variable, parsed as a Go duration string (e.g. "60s").
+// It falls back to defaultValue when the variable is unset, empty, invalid or
+// not strictly positive.
+func getLeaderElectionDuration(envVar string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(envVar); value != "" {
+		if duration, err := time.ParseDuration(value); err == nil && duration > 0 {
+			setupLog.Info("Using configured leader election duration", "env", envVar, "value", duration)
+			return duration
+		}
+		setupLog.Info("Invalid leader election duration value, using default", "env", envVar, "invalid_value", value)
+	}
+
+	return defaultValue
 }
 
 // getMaxConcurrentReconciles returns the maximum number of concurrent reconciles for the controller
