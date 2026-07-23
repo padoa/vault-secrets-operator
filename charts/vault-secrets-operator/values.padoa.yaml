@@ -26,7 +26,11 @@ vault:
   address: https://vault.padoa.fr
   authMethod: azure
   azureScaleset: true
-  reconciliationTime: 1800
+  # Periodic full re-sync of every KV VaultSecret. Each reconcile is an etcd
+  # write, so a short interval across many secrets is a sustained write burst
+  # on the control plane. 6h is a safety-net refresh; TTL/expiry-driven renewals
+  # (database, PKI) have their own requeue logic and are unaffected.
+  reconciliationTime: 21600
   # The maxConcurrentReconciles value determines the maximum number of concurrent
   # reconcile operations for VaultSecret resources. Higher is faster, but can cause
   # more load on Vault server and AKS API server.
