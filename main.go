@@ -103,7 +103,13 @@ func main() {
 		options.NewCache = cache.MultiNamespacedCacheBuilder(strings.Split(watchNamespace, ","))
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), options)
+	// controller-runtime defaults (QPS 20 / Burst 30) throttle bursts of
+	// reconcile API calls well below what MAX_CONCURRENT_RECONCILES allows.
+	cfg := ctrl.GetConfigOrDie()
+	cfg.QPS = float32(getEnvInt("K8S_CLIENT_QPS", int(cfg.QPS)))
+	cfg.Burst = getEnvInt("K8S_CLIENT_BURST", cfg.Burst)
+
+	mgr, err := ctrl.NewManager(cfg, options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
@@ -175,6 +181,20 @@ func getLeaderElectionDuration(envVar string, defaultValue time.Duration) time.D
 			return duration
 		}
 		setupLog.Info("Invalid leader election duration value, using default", "env", envVar, "invalid_value", value)
+	}
+
+	return defaultValue
+}
+
+// getEnvInt returns the value of the given environment variable parsed as a
+// strictly positive integer, or defaultValue when unset or invalid.
+func getEnvInt(envVar string, defaultValue int) int {
+	if valueStr := os.Getenv(envVar); valueStr != "" {
+		if value, err := strconv.Atoi(valueStr); err == nil && value > 0 {
+			setupLog.Info("Using configured value", "env", envVar, "value", value)
+			return value
+		}
+		setupLog.Info("Invalid value, using default", "env", envVar, "invalid_value", valueStr, "default", defaultValue)
 	}
 
 	return defaultValue
