@@ -99,6 +99,12 @@ spec:
               value: {{ .Values.vault.gcpRole | quote }}
             - name: MAX_CONCURRENT_RECONCILES
               value: {{ .Values.vault.maxConcurrentReconciles | quote }}
+            {{- with .Values.k8sClient }}
+            - name: K8S_CLIENT_QPS
+              value: {{ .qps | quote }}
+            - name: K8S_CLIENT_BURST
+              value: {{ .burst | quote }}
+            {{- end }}
             {{- with .Values.leaderElection }}
             - name: LEADER_ELECTION_LEASE_DURATION
               value: {{ .leaseDuration | quote }}
