@@ -12,6 +12,9 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+
 jobs:
   build-push:
     runs-on: ubuntu-22.04
