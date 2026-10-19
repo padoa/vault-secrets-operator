@@ -8,7 +8,7 @@ permissions:
 jobs:
   kubernetes:
     name: Kubernetes
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         deployment:
@@ -50,7 +50,7 @@ jobs:
 
   go:
     name: Go
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash
