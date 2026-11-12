@@ -12,6 +12,7 @@ require (
 	github.com/onsi/gomega v1.20.2
 	github.com/padoa/go-azure-msi v0.0.0-20221011081542-68bfb6bdacaf
 	github.com/pkg/errors v0.9.1
+	github.com/prometheus/client_golang v1.12.2
 	golang.org/x/oauth2 v0.0.0-20220909003341-f21342109be1
 	google.golang.org/api v0.96.0
 	google.golang.org/genproto v0.0.0-20220914210030-581e60b4ef85
@@ -33,6 +34,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.8.0 // indirect
+	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/evanphx/json-patch/v5 v5.6.0 // indirect
 	github.com/fatih/color v1.7.0 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
@@ -89,7 +91,6 @@ require (
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/oklog/run v1.0.0 // indirect
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
-	github.com/prometheus/client_golang v1.12.2 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.32.1 // indirect
 	github.com/prometheus/procfs v0.7.3 // indirect
