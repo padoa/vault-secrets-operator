@@ -86,11 +86,14 @@ func (r *VaultSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			// Request object not found, could have been deleted after reconcile request.
 			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
 			// Return and don't requeue
+			deleteVaultSecretMetrics(req.Namespace, req.Name)
 			return ctrl.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
 		return ctrl.Result{}, err
 	}
+
+	defer r.recordVaultSecretMetrics(ctx, instance)
 
 	// Get secret from Vault.
 	// If the VaultSecret contains the vaultRole property we are creating a new client with the specified Vault Role to
